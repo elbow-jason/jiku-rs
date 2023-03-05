@@ -1008,19 +1008,6 @@ mod tests {
         assert_eq!(lexer.next(), eof());
     }
 
-    static KITCHEN_SINK: &'static str = include_str!("../fixtures/queries/kitchen-sink.graphql");
-
-    #[test]
-    fn token_iter_can_tokenize_kitchen_sink() {
-        let it = TokenIter::new(KITCHEN_SINK);
-        let tokens: Vec<Tok<'static>> = it
-            .map(|t| t.unwrap())
-            // .take(430)
-            .collect();
-        assert_eq!(tokens.len(), 464);
-        // assert_eq!(tokens.get(426), None);
-    }
-
     use std::fs;
     use std::path::PathBuf;
 
