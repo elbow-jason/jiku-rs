@@ -1024,14 +1024,13 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    #[test]
-    fn lexer_can_lex_all_query_fixtures() {
-        let paths: Vec<PathBuf> = fs::read_dir("fixtures/queries")
+    fn lex_directory(dir: &str) {
+        let paths: Vec<PathBuf> = fs::read_dir(dir)
             .unwrap()
             .map(|d| d.unwrap())
             .map(|d| d.path())
             .collect();
-
+        assert!(paths.len() > 0);
         for path in paths {
             let data = fs::read_to_string(&path).unwrap();
             let mut it = TokenIter::new(&data[..]);
@@ -1041,5 +1040,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn lexer_can_lex_all_query_fixtures() {
+        lex_directory("fixtures/queries");
+    }
+
+    #[test]
+    fn lexer_can_lex_all_schema_fixtures() {
+        lex_directory("fixtures/schemas");
     }
 }
