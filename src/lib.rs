@@ -138,6 +138,41 @@ enum TokError<'a> {
     // #[error("token is invalid")]
 }
 
+struct TokenIter<'a> {
+    done: bool,
+    lexer: Lexer<'a>,
+}
+
+impl<'a> TokenIter<'a> {
+    fn new(text: &'a str) -> TokenIter<'a> {
+        TokenIter {
+            done: false,
+            lexer: Lexer::new(text),
+        }
+    }
+}
+
+impl<'a> Iterator for TokenIter<'a> {
+    type Item = Result<Tok<'a>, TokError<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        match self.lexer.next() {
+            Ok(tok) => Some(Ok(tok)),
+            // it's done without err
+            Err(e) => {
+                self.done = true;
+                match &e {
+                    TokError::EOF => None,
+                    _ => Some(Err(e)),
+                }
+            }
+        }
+    }
+}
+
 struct Lexer<'a> {
     text: &'a str,
     chars: Peekable<Chars<'a>>,
@@ -544,6 +579,13 @@ impl<'a> Lexer<'a> {
                         message: "unclosed block string",
                     });
                 }
+                Ok('\\') => {
+                    // skip the next char (this means that `\"""` results in skip-dq-dq and does not
+                    // close the block string.
+                    len += 1;
+                    dq_run = 0;
+                    _ = self.next_char();
+                }
                 Ok('"') => {
                     dq_run += 1;
                     len += 1;
@@ -877,5 +919,79 @@ mod tests {
     #[test]
     fn lexer_pipe_alone() {
         test_alone!("|", Pipe);
+    }
+
+    #[test]
+    fn lexer_empty_schema() {
+        let text = "schema{}";
+        let mut lexer = Lexer::new(text);
+        assert_eq!(lexer.next(), Ok(tok(Name("schema"), pos(1, 1))));
+        assert_eq!(lexer.next(), Ok(tok(OpenCurly, pos(1, 7))));
+        assert_eq!(lexer.next(), Ok(tok(CloseCurly, pos(1, 8))));
+        assert_eq!(lexer.next(), eof());
+    }
+
+    #[test]
+    fn lexer_selection_set() {
+        let text = "
+{
+  name
+  age
+  picture
+}";
+        let mut lexer = Lexer::new(text.trim());
+        // line 1 - {
+        assert_eq!(lexer.next(), Ok(tok(OpenCurly, pos(1, 1))));
+        assert_eq!(lexer.next(), Ok(tok(Newline, pos(1, 2))));
+        // line 2 - name
+        assert_eq!(lexer.next(), Ok(tok(Space, pos(2, 1))));
+        assert_eq!(lexer.next(), Ok(tok(Space, pos(2, 2))));
+        assert_eq!(lexer.next(), Ok(tok(Name("name"), pos(2, 3))));
+        assert_eq!(lexer.next(), Ok(tok(Newline, pos(2, 7))));
+
+        // line 3 - age
+        assert_eq!(lexer.next(), Ok(tok(Space, pos(3, 1))));
+        assert_eq!(lexer.next(), Ok(tok(Space, pos(3, 2))));
+        assert_eq!(lexer.next(), Ok(tok(Name("age"), pos(3, 3))));
+        assert_eq!(lexer.next(), Ok(tok(Newline, pos(3, 6))));
+
+        // line 4 - picture
+        assert_eq!(lexer.next(), Ok(tok(Space, pos(4, 1))));
+        assert_eq!(lexer.next(), Ok(tok(Space, pos(4, 2))));
+        assert_eq!(lexer.next(), Ok(tok(Name("picture"), pos(4, 3))));
+        assert_eq!(lexer.next(), Ok(tok(Newline, pos(4, 10))));
+
+        // line 5 - }
+        assert_eq!(lexer.next(), Ok(tok(CloseCurly, pos(5, 1))));
+        assert_eq!(lexer.next(), eof());
+    }
+
+    #[test]
+    fn lexer_list_of_int_lits() {
+        let text = "[1, 2, 3]";
+        let mut lexer = Lexer::new(text);
+        assert_eq!(lexer.next(), Ok(tok(OpenBracket, pos(1, 1))));
+        assert_eq!(lexer.next(), Ok(tok(IntLit("1"), pos(1, 2))));
+        assert_eq!(lexer.next(), Ok(tok(Comma, pos(1, 3))));
+        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 4))));
+        assert_eq!(lexer.next(), Ok(tok(IntLit("2"), pos(1, 5))));
+        assert_eq!(lexer.next(), Ok(tok(Comma, pos(1, 6))));
+        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 7))));
+        assert_eq!(lexer.next(), Ok(tok(IntLit("3"), pos(1, 8))));
+        assert_eq!(lexer.next(), Ok(tok(CloseBracket, pos(1, 9))));
+        assert_eq!(lexer.next(), eof());
+    }
+
+    static KITCHEN_SINK: &'static str = include_str!("../fixtures/queries/kitchen-sink.graphql");
+
+    #[test]
+    fn token_iter_can_tokenize_kitchen_sink() {
+        let it = TokenIter::new(KITCHEN_SINK);
+        let tokens: Vec<Tok<'static>> = it
+            .map(|t| dbg!(t.unwrap()))
+            // .take(430)
+            .collect();
+        assert_eq!(tokens.len(), 464);
+        // assert_eq!(tokens.get(426), None);
     }
 }
