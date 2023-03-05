@@ -1,7 +1,7 @@
 mod common;
-pub use common::{Directive, DirectiveName, Int, Type, TypeName, Value, VariableName};
+pub use common::*;
 
 mod query;
 
 mod schema;
-pub use schema::{SchemaDef, SchemaDocument, SchemaError};
+pub use schema::*;

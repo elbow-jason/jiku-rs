@@ -60,24 +60,26 @@ fn char_terminates_number(c: char) -> bool {
     }
 }
 
+/// TokenValue only holds tag-like enums and tuple-with-str variants - therefore
+/// it is, conveniently, Copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TokenValue<'a> {
+pub enum TokenValue<T: AsRef<str>> {
     Space,
     Newline,
     CarriageReturn,
     Comma,
-    Name(&'a str),
-    IntLit(&'a str),
-    FloatLit(&'a str),
+    Name(T),
+    IntLit(T),
+    FloatLit(T),
     // \u{FEFF}
     UnicodeBom,
     Tab,
     // "hello"
-    StringLit(&'a str),
+    StringLit(T),
     // """things"""
-    BlockStringLit(&'a str),
+    BlockStringLit(T),
     // # some comment
-    Comment(&'a str),
+    Comment(T),
     OpenParen,
     CloseParen,
     OpenCurly,
@@ -86,7 +88,7 @@ pub enum TokenValue<'a> {
     CloseBracket,
     Colon,
     // $name
-    VariableName(&'a str),
+    VariableName(T),
     // ...
     ThreeDots,
     // =
@@ -96,37 +98,54 @@ pub enum TokenValue<'a> {
     // ! (Exclamation???)
     Bang,
     // @
-    DirectiveName(&'a str),
+    DirectiveName(T),
     // ...friendFields
-    Fragment(&'a str),
+    Fragment(T),
     // |
     Pipe,
 }
 
+impl From<TokenValue<&str>> for TokenValue<String> {
+    fn from(v: TokenValue<&str>) -> TokenValue<String> {
+        v.into()
+    }
+}
+
+type TokenValueStr<'a> = TokenValue<&'a str>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token<'a> {
-    val: TokenValue<'a>,
+    val: TokenValue<&'a str>,
     pos: Pos,
 }
 
 impl<'a> Token<'a> {
-    fn new(val: TokenValue<'a>, pos: Pos) -> Self {
+    fn new(val: TokenValueStr<'a>, pos: Pos) -> Self {
         Token { val, pos }
+    }
+
+    pub fn value(&self) -> TokenValueStr<'a> {
+        self.val
+    }
+
+    pub fn pos(&self) -> Pos {
+        self.pos
     }
 }
 
-#[derive(ThisError, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LexerError<'a> {
+#[derive(ThisError, Debug, Clone, PartialEq, Eq)]
+pub enum LexerError {
     #[error("eof - no more tokens")]
     EOF,
     #[error("invalid token {word:?} at {pos:?} due to {message}")]
     InvalidToken {
-        word: &'a str,
+        word: String,
         pos: Pos,
         message: &'static str,
     },
 }
 
+#[derive(Clone)]
 pub struct LexerIter<'a> {
     done: bool,
     lexer: Lexer<'a>,
@@ -142,7 +161,7 @@ impl<'a> LexerIter<'a> {
 }
 
 impl<'a> Iterator for LexerIter<'a> {
-    type Item = Result<Token<'a>, LexerError<'a>>;
+    type Item = Result<Token<'a>, LexerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {
@@ -162,6 +181,7 @@ impl<'a> Iterator for LexerIter<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct Lexer<'a> {
     text: &'a str,
     chars: Peekable<Chars<'a>>,
@@ -179,7 +199,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn next_char(&mut self) -> Result<char, LexerError<'a>> {
+    fn next_char(&mut self) -> Result<char, LexerError> {
         let c = self.chars.next().ok_or(LexerError::EOF)?;
         self.offset += c.len_utf8();
         self.pos = self.pos.update_char(c);
@@ -191,7 +211,7 @@ impl<'a> Lexer<'a> {
         self.pos = self.pos.update_char(c);
     }
 
-    pub fn next(&mut self) -> Result<Token<'a>, LexerError<'a>> {
+    pub fn next(&mut self) -> Result<Token<'a>, LexerError> {
         // capture the pos and offset before we call next_char - next_char updates the pos and offset.
         let pos = self.pos;
         let offset = self.offset;
@@ -243,12 +263,12 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         let mut len = 1 + self.consume_while(|c| c == '.');
         if len != 3 {
             len += self.consume_while(char_is_human_word);
             return Err(LexerError::InvalidToken {
-                word: self.slice(offset, len),
+                word: self.slice(offset, len).into(),
                 pos,
                 message: "expected exactly 3 dots",
             });
@@ -269,7 +289,7 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         let var_name = self.full_name_str(offset, pos, 1, "invalid variable name")?;
         Ok(TokenValue::VariableName(var_name))
     }
@@ -278,7 +298,7 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         let dir_name = self.full_name_str(offset, pos, 1, "invalid directive name")?;
         Ok(TokenValue::DirectiveName(dir_name))
     }
@@ -289,7 +309,7 @@ impl<'a> Lexer<'a> {
         pos: Pos,
         mut len: usize,
         message: &'static str,
-    ) -> Result<&'a str, LexerError<'a>> {
+    ) -> Result<&'a str, LexerError> {
         match self.peek() {
             Some(c) if char_starts_name(c) => {
                 // it's a name!
@@ -300,7 +320,7 @@ impl<'a> Lexer<'a> {
                 // it's not a name...
                 len += self.consume_while(char_is_human_word);
                 return Err(LexerError::InvalidToken {
-                    word: self.slice(offset, len),
+                    word: self.slice(offset, len).into(),
                     pos,
                     message,
                 });
@@ -308,7 +328,7 @@ impl<'a> Lexer<'a> {
             None => {
                 // it's a dollar sign with no name...
                 return Err(LexerError::InvalidToken {
-                    word: self.slice(offset, len),
+                    word: self.slice(offset, len).into(),
                     pos,
                     message,
                 });
@@ -324,12 +344,12 @@ impl<'a> Lexer<'a> {
         offset: usize,
         pos: Pos,
         is_neg: bool,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         let mut len = 1 + self.consume_while(|c| c.is_numeric());
-        let minus_error = || -> Result<(), LexerError<'a>> {
+        let minus_error = || -> Result<(), LexerError> {
             if is_neg && len == 1 {
                 return Err(LexerError::InvalidToken {
-                    word: "-",
+                    word: "-".to_string(),
                     pos,
                     message: "unexpected minus",
                 });
@@ -370,7 +390,7 @@ impl<'a> Lexer<'a> {
                     minus_error()?;
                     len += self.consume_while(char_is_human_word);
                     return Err(LexerError::InvalidToken {
-                        word: self.slice(offset, len),
+                        word: self.slice(offset, len).into(),
                         pos,
                         message: "invalid number",
                     });
@@ -400,11 +420,11 @@ impl<'a> Lexer<'a> {
         offset: usize,
         pos: Pos,
         mut len: usize,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         let mantissa_len = self.consume_while(|c| c.is_numeric());
         if mantissa_len == 0 {
             return Err(LexerError::InvalidToken {
-                word: self.slice(offset, len),
+                word: self.slice(offset, len).into(),
                 pos,
                 message: "incomplete float - missing mantissa",
             });
@@ -418,7 +438,7 @@ impl<'a> Lexer<'a> {
         offset: usize,
         pos: Pos,
         mut len: usize,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         match self.peek() {
             Some('e' | 'E') => {
                 // it's scientific notation... as long as the next thing is 1 or more digits.
@@ -437,7 +457,7 @@ impl<'a> Lexer<'a> {
                 if exponent_len == 0 {
                     len += self.consume_while(char_is_human_word);
                     return Err(LexerError::InvalidToken {
-                        word: self.slice(offset, len),
+                        word: self.slice(offset, len).into(),
                         pos,
                         message: "invalid float exponent",
                     });
@@ -462,7 +482,7 @@ impl<'a> Lexer<'a> {
                         // the character after the exponent is not whitespace and not eof.
                         // it's a messed up looking float-like thing.
                         return Err(LexerError::InvalidToken {
-                            word: self.slice(offset, len + 1),
+                            word: self.slice(offset, len + 1).into(),
                             pos,
                             message: "float exponent is invalid",
                         });
@@ -479,7 +499,7 @@ impl<'a> Lexer<'a> {
                 // this float is touching other non-whitespace chars.
                 len += self.consume_while(char_is_human_word);
                 return Err(LexerError::InvalidToken {
-                    word: self.slice(offset, len),
+                    word: self.slice(offset, len).into(),
                     pos,
                     message: "invalid float",
                 });
@@ -493,13 +513,13 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn rest_name(&mut self, offset: usize) -> TokenValue<'a> {
+    fn rest_name(&mut self, offset: usize) -> TokenValueStr<'a> {
         let len = 1 + self.consume_while(char_continues_name);
         let name = self.slice(offset, len);
         TokenValue::Name(name)
     }
 
-    fn rest_comment(&mut self, offset: usize) -> TokenValue<'a> {
+    fn rest_comment(&mut self, offset: usize) -> TokenValueStr<'a> {
         // comment is terminated by a newline or EOF.
         let len = 1 + self.consume_while(|c| c != '\n');
         let comment = self.slice(offset, len);
@@ -510,13 +530,13 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         match self.peek() {
             None => {
                 // this freshly opened string's double-quote was at eof and not complete.
                 // e.g. the text looks like this: "... \"" at eof
                 return Err(LexerError::InvalidToken {
-                    word: self.slice(offset, 1),
+                    word: self.slice(offset, 1).into(),
                     pos,
                     message: "unclosed string",
                 });
@@ -554,7 +574,7 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         let mut len = 1;
         loop {
             match self.next_char() {
@@ -562,7 +582,7 @@ impl<'a> Lexer<'a> {
                 Err(LexerError::EOF) => {
                     // this string did not close before eof.
                     return Err(LexerError::InvalidToken {
-                        word: self.slice(offset, len),
+                        word: self.slice(offset, len).into(),
                         pos,
                         message: "unclosed string",
                     });
@@ -587,7 +607,7 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokenValue<'a>, LexerError<'a>> {
+    ) -> Result<TokenValueStr<'a>, LexerError> {
         let mut len = 3;
         let mut dq_run = 0;
         loop {
@@ -597,7 +617,7 @@ impl<'a> Lexer<'a> {
                 Err(LexerError::EOF) => {
                     // we encountered eof before the block string closed.
                     return Err(LexerError::InvalidToken {
-                        word: self.slice(offset, len),
+                        word: self.slice(offset, len).into(),
                         pos,
                         message: "unclosed block string",
                     });
@@ -636,11 +656,11 @@ mod tests {
         Pos { line, col }
     }
 
-    fn tok<'a>(val: TokenValue<'a>, pos: Pos) -> Token<'a> {
+    fn tok<'a>(val: TokenValueStr<'a>, pos: Pos) -> Token<'a> {
         Token::new(val, pos)
     }
 
-    fn eof<'a>() -> Result<Token<'a>, LexerError<'a>> {
+    fn eof<'a>() -> Result<Token<'a>, LexerError> {
         Err(LexerError::EOF)
     }
 
@@ -838,7 +858,7 @@ mod tests {
         assert_eq!(
             lexer.next(),
             Err(LexerError::InvalidToken {
-                word: "-1.23e-",
+                word: "-1.23e-".to_string(),
                 pos: pos(1, 1),
                 message: "invalid float exponent"
             })
@@ -853,7 +873,7 @@ mod tests {
         assert_eq!(
             lexer.next(),
             Err(LexerError::InvalidToken {
-                word: "-1.23e",
+                word: "-1.23e".to_string(),
                 pos: pos(1, 1),
                 message: "invalid float exponent"
             })
@@ -868,7 +888,7 @@ mod tests {
         assert_eq!(
             lexer.next(),
             Err(LexerError::InvalidToken {
-                word: "-1.23emu-1234",
+                word: "-1.23emu-1234".to_string(),
                 pos: pos(1, 1),
                 message: "invalid float exponent"
             })
@@ -883,7 +903,7 @@ mod tests {
         assert_eq!(
             lexer.next(),
             Err(LexerError::InvalidToken {
-                word: "-1.23blep",
+                word: "-1.23blep".to_string(),
                 pos: pos(1, 1),
                 message: "invalid float"
             })

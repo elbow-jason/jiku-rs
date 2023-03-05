@@ -1,31 +1,30 @@
-use thiserror::Error as ThisError;
-
 use crate::{Directive, DirectiveName, Pos, TypeName};
 
-#[derive(ThisError, Debug, Clone, PartialEq, Eq)]
-pub enum SchemaError {
-    #[error("schema syntax error at {pos:?}: {reason:?}")]
-    SyntaxError { reason: &'static str, pos: Pos },
+#[derive(Debug, Clone)]
+pub struct SchemaDoc<'a> {
+    pub definitions: Vec<SchemaTopLevelDefinition<'a>>,
 }
 
-pub struct SchemaDocument<'a> {
-    pub schema: SchemaDef<'a>,
-}
-
-pub enum Definition<'a> {
+#[derive(Debug, Clone)]
+pub enum SchemaTopLevelDefinition<'a> {
     SchemaDef(SchemaDef<'a>),
     TypeDef(TypeDef<'a>),
     TypeExt(TypeExt<'a>),
     DirectiveDef(DirectiveDef<'a>),
 }
 
+#[derive(Debug, Clone)]
 pub struct DirectiveDef<'a> {
     pub name: DirectiveName<'a>,
     // pub arguments: Vec<Argument<'a>>,
 }
+
+#[derive(Debug, Clone)]
 pub struct TypeDef<'a> {
     pub name: TypeName<'a>,
 }
+
+#[derive(Debug, Clone)]
 pub struct TypeExt<'a> {
     pub name: TypeName<'a>,
 }

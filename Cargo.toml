@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0.38"
+ord_float = { git = "https://github.com/elbow-jason/ord_float.git" }
