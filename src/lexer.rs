@@ -104,14 +104,14 @@ pub enum TokenValue<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Tok<'a> {
+pub struct Token<'a> {
     val: TokenValue<'a>,
     pos: Pos,
 }
 
-impl<'a> Tok<'a> {
+impl<'a> Token<'a> {
     fn new(val: TokenValue<'a>, pos: Pos) -> Self {
-        Tok { val, pos }
+        Token { val, pos }
     }
 }
 
@@ -142,7 +142,7 @@ impl<'a> LexerIter<'a> {
 }
 
 impl<'a> Iterator for LexerIter<'a> {
-    type Item = Result<Tok<'a>, LexerError<'a>>;
+    type Item = Result<Token<'a>, LexerError<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.done {
@@ -191,7 +191,7 @@ impl<'a> Lexer<'a> {
         self.pos = self.pos.update_char(c);
     }
 
-    pub fn next(&mut self) -> Result<Tok<'a>, LexerError<'a>> {
+    pub fn next(&mut self) -> Result<Token<'a>, LexerError<'a>> {
         // capture the pos and offset before we call next_char - next_char updates the pos and offset.
         let pos = self.pos;
         let offset = self.offset;
@@ -228,7 +228,7 @@ impl<'a> Lexer<'a> {
             _ => panic!("unhandled char: {:?}", c),
         };
 
-        Ok(Tok::new(val, pos))
+        Ok(Token::new(val, pos))
     }
 
     fn slice(&self, offset: usize, len: usize) -> &'a str {
@@ -636,11 +636,11 @@ mod tests {
         Pos { line, col }
     }
 
-    fn tok<'a>(val: TokenValue<'a>, pos: Pos) -> Tok<'a> {
-        Tok::new(val, pos)
+    fn tok<'a>(val: TokenValue<'a>, pos: Pos) -> Token<'a> {
+        Token::new(val, pos)
     }
 
-    fn eof<'a>() -> Result<Tok<'a>, LexerError<'a>> {
+    fn eof<'a>() -> Result<Token<'a>, LexerError<'a>> {
         Err(LexerError::EOF)
     }
 
