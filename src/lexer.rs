@@ -17,12 +17,10 @@ pub struct Pos {
     pub col: usize,
 }
 
-const BOM_CHAR: char = '\u{FEFF}';
-
 impl Pos {
     fn update_char(mut self, c: char) -> Pos {
         match c {
-            BOM_CHAR | '\r' => (),
+            '\u{FEFF}' | '\r' => (),
             '\t' => self.col += 8,
             '\n' => {
                 // go to the next line and cr back to column 1
@@ -65,7 +63,7 @@ fn char_terminates_number(c: char) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TokVal<'a> {
+pub enum TokenValue<'a> {
     Space,
     Newline,
     CarriageReturn,
@@ -89,7 +87,7 @@ pub enum TokVal<'a> {
     OpenBracket,
     CloseBracket,
     Colon,
-    //$name
+    // $name
     VariableName(&'a str),
     // ...
     ThreeDots,
@@ -109,12 +107,12 @@ pub enum TokVal<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Tok<'a> {
-    val: TokVal<'a>,
+    val: TokenValue<'a>,
     pos: Pos,
 }
 
 impl<'a> Tok<'a> {
-    fn new(val: TokVal<'a>, pos: Pos) -> Self {
+    fn new(val: TokenValue<'a>, pos: Pos) -> Self {
         Tok { val, pos }
     }
 }
@@ -201,13 +199,13 @@ impl<'a> Lexer<'a> {
         let offset = self.offset;
         let c = self.next_char()?;
 
-        use TokVal::*;
+        use TokenValue::*;
         let val = match c {
             ' ' => Space,
             '\n' => Newline,
             ',' => Comma,
             '\t' => Tab,
-            BOM_CHAR => UnicodeBom,
+            '\u{FEFF}' => UnicodeBom,
             '\r' => CarriageReturn,
             '(' => OpenParen,
             ')' => CloseParen,
@@ -243,7 +241,11 @@ impl<'a> Lexer<'a> {
         self.chars.peek().map(|c| *c)
     }
 
-    fn rest_three_dots(&mut self, offset: usize, pos: Pos) -> Result<TokVal<'a>, LexerError<'a>> {
+    fn rest_three_dots(
+        &mut self,
+        offset: usize,
+        pos: Pos,
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         let mut len = 1 + self.consume_while(|c| c == '.');
         if len != 3 {
             len += self.consume_while(char_is_human_word);
@@ -256,11 +258,11 @@ impl<'a> Lexer<'a> {
         match self.peek() {
             Some(c) if char_starts_name(c) => {
                 let frag = self.full_name_str(offset, pos, 3, "invalid fragment")?;
-                Ok(TokVal::Fragment(frag))
+                Ok(TokenValue::Fragment(frag))
             }
             Some(_) | None => {
                 debug_assert!(self.slice(offset, len) == "...");
-                Ok(TokVal::ThreeDots)
+                Ok(TokenValue::ThreeDots)
             }
         }
     }
@@ -269,18 +271,18 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokVal<'a>, LexerError<'a>> {
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         let var_name = self.full_name_str(offset, pos, 1, "invalid variable name")?;
-        Ok(TokVal::VariableName(var_name))
+        Ok(TokenValue::VariableName(var_name))
     }
 
     fn rest_directive_name(
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokVal<'a>, LexerError<'a>> {
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         let dir_name = self.full_name_str(offset, pos, 1, "invalid directive name")?;
-        Ok(TokVal::DirectiveName(dir_name))
+        Ok(TokenValue::DirectiveName(dir_name))
     }
 
     fn full_name_str(
@@ -324,7 +326,7 @@ impl<'a> Lexer<'a> {
         offset: usize,
         pos: Pos,
         is_neg: bool,
-    ) -> Result<TokVal<'a>, LexerError<'a>> {
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         let mut len = 1 + self.consume_while(|c| c.is_numeric());
         let minus_error = || -> Result<(), LexerError<'a>> {
             if is_neg && len == 1 {
@@ -354,7 +356,7 @@ impl<'a> Lexer<'a> {
                 Some(c) if char_terminates_number(c) => {
                     minus_error()?;
                     let int = self.slice(offset, len);
-                    return Ok(TokVal::IntLit(int));
+                    return Ok(TokenValue::IntLit(int));
                 }
                 None => {
                     // we have encountered eof or a non-numeric and non-period char.
@@ -364,7 +366,7 @@ impl<'a> Lexer<'a> {
                     minus_error()?;
                     // as long as the number is not '-' we have an integer.
                     let int = self.slice(offset, len);
-                    return Ok(TokVal::IntLit(int));
+                    return Ok(TokenValue::IntLit(int));
                 }
                 Some(_) => {
                     minus_error()?;
@@ -400,7 +402,7 @@ impl<'a> Lexer<'a> {
         offset: usize,
         pos: Pos,
         mut len: usize,
-    ) -> Result<TokVal<'a>, LexerError<'a>> {
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         let mantissa_len = self.consume_while(|c| c.is_numeric());
         if mantissa_len == 0 {
             return Err(LexerError::InvalidToken {
@@ -418,7 +420,7 @@ impl<'a> Lexer<'a> {
         offset: usize,
         pos: Pos,
         mut len: usize,
-    ) -> Result<TokVal<'a>, LexerError<'a>> {
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         match self.peek() {
             Some('e' | 'E') => {
                 // it's scientific notation... as long as the next thing is 1 or more digits.
@@ -449,14 +451,14 @@ impl<'a> Lexer<'a> {
                         // it's a well-formed float.
                         let float = self.slice(offset, len);
                         debug_assert!(float.parse::<f64>().is_ok());
-                        return Ok(TokVal::FloatLit(float));
+                        return Ok(TokenValue::FloatLit(float));
                     }
                     None => {
                         // the last character of the exponent is eof.
                         // it's a well-formed float.
                         let float = self.slice(offset, len);
                         debug_assert!(float.parse::<f64>().is_ok());
-                        return Ok(TokVal::FloatLit(float));
+                        return Ok(TokenValue::FloatLit(float));
                     }
                     Some(_) => {
                         // the character after the exponent is not whitespace and not eof.
@@ -473,7 +475,7 @@ impl<'a> Lexer<'a> {
                 // the float was complete on the previous char.
                 let float = self.slice(offset, len);
                 debug_assert!(float.parse::<f64>().is_ok());
-                return Ok(TokVal::FloatLit(float));
+                return Ok(TokenValue::FloatLit(float));
             }
             Some(_) => {
                 // this float is touching other non-whitespace chars.
@@ -488,29 +490,29 @@ impl<'a> Lexer<'a> {
                 // the float as eof.
                 let float = self.slice(offset, len);
                 debug_assert!(float.parse::<f64>().is_ok());
-                return Ok(TokVal::FloatLit(float));
+                return Ok(TokenValue::FloatLit(float));
             }
         }
     }
 
-    fn rest_name(&mut self, offset: usize) -> TokVal<'a> {
+    fn rest_name(&mut self, offset: usize) -> TokenValue<'a> {
         let len = 1 + self.consume_while(char_continues_name);
         let name = self.slice(offset, len);
-        TokVal::Name(name)
+        TokenValue::Name(name)
     }
 
-    fn rest_comment(&mut self, offset: usize) -> TokVal<'a> {
+    fn rest_comment(&mut self, offset: usize) -> TokenValue<'a> {
         // comment is terminated by a newline or EOF.
         let len = 1 + self.consume_while(|c| c != '\n');
         let comment = self.slice(offset, len);
-        return TokVal::Comment(comment);
+        return TokenValue::Comment(comment);
     }
 
     fn rest_string_or_block_string(
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokVal<'a>, LexerError<'a>> {
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         match self.peek() {
             None => {
                 // this freshly opened string's double-quote was at eof and not complete.
@@ -538,7 +540,7 @@ impl<'a> Lexer<'a> {
                     Some(_) | None => {
                         // it was an empty string!
                         debug_assert!(self.slice(offset, 2) == "\"\"");
-                        Ok(TokVal::StringLit("\"\""))
+                        Ok(TokenValue::StringLit("\"\""))
                     }
                 }
             }
@@ -554,7 +556,7 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokVal<'a>, LexerError<'a>> {
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         let mut len = 1;
         loop {
             match self.next_char() {
@@ -571,7 +573,7 @@ impl<'a> Lexer<'a> {
                     // the string just closed.
                     len += 1;
                     let string = self.slice(offset, len);
-                    return Ok(TokVal::StringLit(string));
+                    return Ok(TokenValue::StringLit(string));
                 }
                 Ok(c) => {
                     // c is yet another char in the content of the string.
@@ -587,7 +589,7 @@ impl<'a> Lexer<'a> {
         &mut self,
         offset: usize,
         pos: Pos,
-    ) -> Result<TokVal<'a>, LexerError<'a>> {
+    ) -> Result<TokenValue<'a>, LexerError<'a>> {
         let mut len = 3;
         let mut dq_run = 0;
         loop {
@@ -615,7 +617,7 @@ impl<'a> Lexer<'a> {
                     if dq_run == 3 {
                         // the block string just closed.
                         let block_string = self.slice(offset, len);
-                        return Ok(TokVal::BlockStringLit(block_string));
+                        return Ok(TokenValue::BlockStringLit(block_string));
                     }
                 }
                 Ok(c) => {
@@ -630,13 +632,13 @@ impl<'a> Lexer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use TokVal::*;
+    use TokenValue::*;
 
     fn pos(line: usize, col: usize) -> Pos {
         Pos { line, col }
     }
 
-    fn tok<'a>(val: TokVal<'a>, pos: Pos) -> Tok<'a> {
+    fn tok<'a>(val: TokenValue<'a>, pos: Pos) -> Tok<'a> {
         Tok::new(val, pos)
     }
 
