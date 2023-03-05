@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! The lexer represents the first major step in the parsing process.
 //!
 //! The lexer's input is source code and it's output is an iterator of tokens or an error.
