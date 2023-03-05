@@ -70,6 +70,14 @@ fn char_is_human_word(c: char) -> bool {
     c.is_alphanumeric() || c == '-' || c == '_'
 }
 
+#[inline(always)]
+fn char_terminates_number(c: char) -> bool {
+    match c {
+        ' ' | '\n' | '\r' | ',' | ']' | ')' | '}' => true,
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokVal<'a> {
     Space,
@@ -325,6 +333,17 @@ impl<'a> Lexer<'a> {
         is_neg: bool,
     ) -> Result<TokVal<'a>, TokError<'a>> {
         let mut len = 1 + self.consume_while(|c| c.is_numeric());
+        let minus_error = || -> Result<(), TokError<'a>> {
+            if is_neg && len == 1 {
+                return Err(TokError::Invalid {
+                    word: "-",
+                    pos,
+                    message: "unexpected minus",
+                });
+            }
+            Ok(())
+        };
+
         loop {
             match self.peek() {
                 Some('.') => {
@@ -339,22 +358,29 @@ impl<'a> Lexer<'a> {
                     // it's an int with an exponent e.g. 10e50 (gj graphql)
                     return self.rest_float_exponent(offset, pos, len);
                 }
-                Some(_) | None => {
+                Some(c) if char_terminates_number(c) => {
+                    minus_error()?;
+                    let int = self.slice(offset, len);
+                    return Ok(TokVal::IntLit(int));
+                }
+                None => {
                     // we have encountered eof or a non-numeric and non-period char.
                     // the number is an integer or invalid.
                     // if the number was negative and the len is 1 then we
                     // have a '-'; that's not a valid int.
-                    if is_neg && len == 1 {
-                        debug_assert!(self.slice(offset, 1) == "-");
-                        return Err(TokError::Invalid {
-                            word: self.slice(offset, 1),
-                            pos,
-                            message: "unexpected minus",
-                        });
-                    }
+                    minus_error()?;
                     // as long as the number is not '-' we have an integer.
                     let int = self.slice(offset, len);
                     return Ok(TokVal::IntLit(int));
+                }
+                Some(_) => {
+                    minus_error()?;
+                    len += self.consume_while(char_is_human_word);
+                    return Err(TokError::Invalid {
+                        word: self.slice(offset, len),
+                        pos,
+                        message: "invalid number",
+                    });
                 }
             }
         }
@@ -450,7 +476,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
             }
-            Some(c) if c.is_whitespace() => {
+            Some(c) if char_terminates_number(c) => {
                 // the float was complete on the previous char.
                 let float = self.slice(offset, len);
                 debug_assert!(float.parse::<f64>().is_ok());
@@ -988,10 +1014,32 @@ mod tests {
     fn token_iter_can_tokenize_kitchen_sink() {
         let it = TokenIter::new(KITCHEN_SINK);
         let tokens: Vec<Tok<'static>> = it
-            .map(|t| dbg!(t.unwrap()))
+            .map(|t| t.unwrap())
             // .take(430)
             .collect();
         assert_eq!(tokens.len(), 464);
         // assert_eq!(tokens.get(426), None);
+    }
+
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn lexer_can_lex_all_query_fixtures() {
+        let paths: Vec<PathBuf> = fs::read_dir("fixtures/queries")
+            .unwrap()
+            .map(|d| d.unwrap())
+            .map(|d| d.path())
+            .collect();
+
+        for path in paths {
+            let data = fs::read_to_string(&path).unwrap();
+            let mut it = TokenIter::new(&data[..]);
+            while let Some(res) = it.next() {
+                if res.is_err() {
+                    panic!("lexer failed on fixture {:?}: {:?}", path, res.unwrap_err());
+                }
+            }
+        }
     }
 }
