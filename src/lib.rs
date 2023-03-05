@@ -31,7 +31,6 @@ pub struct Pos {
 }
 
 const BOM_CHAR: char = '\u{FEFF}';
-const BOM_STR: &'static str = "\u{FEFF}";
 
 impl Pos {
     fn update_char(mut self, c: char) -> Pos {
@@ -152,7 +151,7 @@ struct TokenIter<'a> {
 }
 
 impl<'a> TokenIter<'a> {
-    fn new(text: &'a str) -> TokenIter<'a> {
+    pub fn new(text: &'a str) -> TokenIter<'a> {
         TokenIter {
             done: false,
             lexer: Lexer::new(text),
@@ -189,7 +188,7 @@ struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    fn new(text: &'a str) -> Lexer<'a> {
+    pub fn new(text: &'a str) -> Lexer<'a> {
         Lexer {
             text,
             chars: text.chars().peekable(),
