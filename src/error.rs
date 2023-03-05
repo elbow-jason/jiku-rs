@@ -6,6 +6,9 @@ pub enum Error {
     #[error("query error: {reason:?}")]
     QueryError { reason: &'static str },
 
+    #[error("query error: {reason:?}")]
+    SchemaError { reason: &'static str },
+
     #[error("tokenizer error: at {pos:?} - {message:?}")]
     TokenizerError { pos: Pos, message: String },
 }
