@@ -34,10 +34,16 @@ pub struct DirectiveName<'a>(pub &'a str);
 pub struct VariableName<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FieldName<'a>(pub &'a str);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Value<'a> {
     inner: ValueInner<'a>,
     pos: Pos,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DefaultValue<'a>(Value<'a>);
 
 #[derive(Debug, Clone, Eq, Ord, PartialOrd, Hash)]
 pub struct Map<'a> {
@@ -71,9 +77,9 @@ pub struct Directive<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type<'a> {
-    NamedType(&'a str),
-    ListType(Box<Type<'a>>),
-    NonNullType(Box<Type<'a>>),
+    Name(TypeName<'a>),
+    List(Box<Type<'a>>),
+    NonNull(Box<Type<'a>>),
 }
 
 // TODO: do we need a big-int for Int?

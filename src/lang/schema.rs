@@ -1,8 +1,13 @@
-use crate::{Directive, DirectiveName, Pos, TypeName};
+use crate::{Directive, DirectiveName, FieldName, Pos, Token, Type, TypeName, Value};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Description<'a> {
+    pub tok: Token<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SchemaDoc<'a> {
-    pub definitions: Vec<SchemaTopLevelDefinition<'a>>,
+    pub definitions: Vec<SchemaTopLevel<'a>>,
 }
 
 impl<'a> SchemaDoc<'a> {
@@ -13,8 +18,8 @@ impl<'a> SchemaDoc<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SchemaTopLevelDefinition<'a> {
+#[derive(Debug, Clone, PartialEq)]
+pub enum SchemaTopLevel<'a> {
     SchemaDef(SchemaDef<'a>),
     TypeDef(TypeDef<'a>),
     TypeExt(TypeExt<'a>),
@@ -27,9 +32,24 @@ pub struct DirectiveDef<'a> {
     // pub arguments: Vec<Argument<'a>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TypeDef<'a> {
-    pub name: TypeName<'a>,
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeDef<'a> {
+    Object(ObjectType<'a>),
+    InputObject(InputObjectType<'a>),
+    // Scalar(ScalarType<'a>),
+    // Interface(InterfaceType<'a>),
+    // Union(UnionType<'a>),
+    // Enum(EnumType<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectType<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub name: &'a str,
+    pub implements_interfaces: Vec<&'a str>,
+    pub directives: Vec<Directive<'a>>,
+    pub fields: Vec<FieldDef<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,4 +64,32 @@ pub struct SchemaDef<'a> {
     pub query: Option<TypeName<'a>>,
     pub mutation: Option<TypeName<'a>>,
     pub subscription: Option<TypeName<'a>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldDef<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub name: FieldName<'a>,
+    pub arguments: Vec<InputValueDef<'a>>,
+    pub ty: Type<'a>,
+    pub directives: Vec<Directive<'a>>,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputObjectType<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub name: TypeName<'a>,
+    pub directives: Vec<Directive<'a>>,
+    pub fields: Vec<InputValueDef<'a>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputValueDef<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub name: TypeName<'a>,
+    pub ty: Type<'a>,
+    pub default_value: Option<Value<'a>>,
+    pub directives: Vec<Directive<'a>>,
 }
