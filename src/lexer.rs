@@ -5,9 +5,6 @@
 //! The
 
 use std::cell::Cell;
-use std::iter::Peekable;
-use std::str::Chars;
-
 use thiserror::Error as ThisError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -228,10 +225,62 @@ impl Default for StateCell {
     }
 }
 
+impl StateCell {
+    #[inline]
+    fn slice<'a>(&self, text: &'a str) -> &'a str {
+        let state = self.state.get();
+        &text[state.offset..]
+    }
+
+    #[inline]
+    fn next_char(&self, text: &str) -> Option<char> {
+        let c = self.slice(text).chars().next()?;
+        self.state.update(|mut state| {
+            state.offset += c.len_utf8();
+            state.pos = state.pos.update_char(c);
+            state
+        });
+
+        Some(c)
+    }
+
+    #[inline]
+    fn peek(&self, text: &str) -> Option<char> {
+        // peek is just like next_char but we do not update the state
+        self.slice(text).chars().next()
+    }
+
+    #[inline]
+    fn consume_while<F: Fn(char) -> bool>(&self, text: &str, f: F) -> usize {
+        let mut count = 0;
+        let mut chars = self.slice(text).chars().peekable();
+        loop {
+            match chars.next_if(|c| f(*c)) {
+                Some(c) => {
+                    self.state.update(|mut state| {
+                        state.offset += c.len_utf8();
+                        state.pos = state.pos.update_char(c);
+                        state
+                    });
+                    count += 1;
+                }
+                None => break,
+            }
+        }
+        count
+    }
+
+    // fn update_pos(&self, c: char) {
+    //     self.state.update(|mut state| {
+    //         state.pos = state.pos.update_char(c);
+    //         state
+    //     });
+    // }
+}
+
 #[derive(Clone)]
 pub struct Lexer<'a> {
     text: &'a str,
-    chars: Peekable<Chars<'a>>,
     cell: StateCell,
 }
 
@@ -239,34 +288,23 @@ impl<'a> Lexer<'a> {
     pub fn new(text: &'a str) -> Lexer<'a> {
         Lexer {
             text,
-            chars: text.chars().peekable(),
             cell: StateCell::default(),
         }
     }
 
-    fn next_char(&mut self) -> Result<char, LexerError> {
-        let c = self.chars.next().ok_or(LexerError::EOF)?;
-        self.cell.state.update(|mut state| {
-            state.offset += c.len_utf8();
-            state.pos = state.pos.update_char(c);
-            state
-        });
-
-        Ok(c)
+    fn next_char(&self) -> Result<char, LexerError> {
+        self.cell.next_char(self.text).ok_or(LexerError::EOF)
     }
 
-    #[inline(always)]
-    fn update_pos(&mut self, c: char) {
-        self.cell.state.update(|mut state| {
-            state.pos = state.pos.update_char(c);
-            state
-        });
-    }
+    // #[inline(always)]
+    // fn update_pos(&mut self, c: char) {
+    //     self.cell.update_pos(c);
+    // }
 
-    pub fn next(&mut self) -> Result<Token<'a>, LexerError> {
-        // capture the pos and offset before we call next_char - next_char updates the pos and offset.
-        // let pos = self.pos;
-        // let offset = self.offset;
+    pub fn next(&self) -> Result<Token<'a>, LexerError> {
+        // capture the pos and offset before we call next_char -
+        // next_char updates the pos and offset and we want the
+        // original position and offset of the word.
         let State { offset, pos } = self.cell.state.get();
 
         let c = self.next_char()?;
@@ -279,6 +317,8 @@ impl<'a> Lexer<'a> {
         };
 
         use TokenValue::*;
+        // figure out what kind of token val we have, or
+        // what function to call to get the token val or error.
         let val = match c {
             ' ' => Space,
             '\n' => Newline,
@@ -305,8 +345,7 @@ impl<'a> Lexer<'a> {
             '-' => self.next_number(word, true)?,
             i if i.is_numeric() => self.next_number(word, false)?,
             s if char_starts_name(s) => self.rest_name(word),
-
-            _ => panic!("unhandled char: {:?}", c),
+            _ => return self.invalid(word, "encountered invalid character"),
         };
 
         Ok(Token::new(val, pos))
@@ -316,11 +355,11 @@ impl<'a> Lexer<'a> {
         &self.text[word.offset..word.offset + word.len]
     }
 
-    fn peek(&mut self) -> Option<char> {
-        self.chars.peek().map(|c| *c)
+    fn peek(&self) -> Option<char> {
+        self.cell.peek(self.text)
     }
 
-    fn rest_three_dots(&mut self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_three_dots(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         word = word.add(self.consume_while(|c| c == '.'));
         if word.len != 3 {
             word = word.add(self.consume_while(char_is_human_word));
@@ -338,12 +377,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn rest_variable_name(&mut self, word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_variable_name(&self, word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         let var_name = self.full_name_str(word, "invalid variable name")?;
         Ok(TokenValue::VariableName(var_name))
     }
 
-    fn rest_directive_name(&mut self, word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_directive_name(&self, word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         let dir_name = self.full_name_str(word, "invalid directive name")?;
         Ok(TokenValue::DirectiveName(dir_name))
     }
@@ -356,11 +395,7 @@ impl<'a> Lexer<'a> {
         })
     }
 
-    fn full_name_str(
-        &mut self,
-        mut word: Word,
-        message: &'static str,
-    ) -> Result<&'a str, LexerError> {
+    fn full_name_str(&self, mut word: Word, message: &'static str) -> Result<&'a str, LexerError> {
         match self.peek() {
             Some(c) if char_starts_name(c) => {
                 // it's a name!
@@ -390,11 +425,7 @@ impl<'a> Lexer<'a> {
         Ok(())
     }
 
-    fn next_number(
-        &mut self,
-        mut word: Word,
-        is_neg: bool,
-    ) -> Result<TokenValueStr<'a>, LexerError> {
+    fn next_number(&self, mut word: Word, is_neg: bool) -> Result<TokenValueStr<'a>, LexerError> {
         debug_assert!(word.len == 1);
         word = word.add(self.consume_while(|c| c.is_numeric()));
 
@@ -439,25 +470,11 @@ impl<'a> Lexer<'a> {
     }
 
     // best. function. ever.
-    fn consume_while<F: Fn(char) -> bool>(&mut self, f: F) -> usize {
-        let mut count = 0;
-        loop {
-            match self.chars.next_if(|c| f(*c)) {
-                Some(c) => {
-                    self.cell.state.update(|mut state| {
-                        state.offset += c.len_utf8();
-                        state.pos = state.pos.update_char(c);
-                        state
-                    });
-                    count += 1;
-                }
-                None => break,
-            }
-        }
-        count
+    fn consume_while<F: Fn(char) -> bool>(&self, f: F) -> usize {
+        self.cell.consume_while(self.text, f)
     }
 
-    fn rest_float_mantissa(&mut self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_float_mantissa(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         let mantissa_len = self.consume_while(|c| c.is_numeric());
         if mantissa_len == 0 {
             return self.invalid(word, "incomplete float - missing mantissa");
@@ -466,7 +483,7 @@ impl<'a> Lexer<'a> {
         self.rest_float_exponent(word)
     }
 
-    fn rest_float_exponent(&mut self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_float_exponent(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         match self.peek() {
             Some('e' | 'E') => {
                 // it's scientific notation... as long as the next thing is 1 or more digits.
@@ -529,14 +546,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn rest_name(&mut self, mut word: Word) -> TokenValueStr<'a> {
+    fn rest_name(&self, mut word: Word) -> TokenValueStr<'a> {
         debug_assert!(word.len == 1);
         word = word.add(self.consume_while(char_continues_name));
         let name = self.slice(word);
         TokenValue::Name(name)
     }
 
-    fn rest_comment(&mut self, mut word: Word) -> TokenValueStr<'a> {
+    fn rest_comment(&self, mut word: Word) -> TokenValueStr<'a> {
         debug_assert!(word.len == 1);
         // comment is terminated by a newline or EOF.
         word = word.add(self.consume_while(|c| c != '\n'));
@@ -544,10 +561,7 @@ impl<'a> Lexer<'a> {
         return TokenValue::Comment(comment);
     }
 
-    fn rest_string_or_block_string(
-        &mut self,
-        mut word: Word,
-    ) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_string_or_block_string(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         match self.peek() {
             None => {
                 // this freshly opened string's double-quote was at eof and not complete.
@@ -586,7 +600,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn next_finish_string(&mut self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn next_finish_string(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         debug_assert!(word.len == 1);
         loop {
             match self.next_char() {
@@ -611,10 +625,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn next_finish_block_string(
-        &mut self,
-        mut word: Word,
-    ) -> Result<TokenValueStr<'a>, LexerError> {
+    fn next_finish_block_string(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         debug_assert!(word.len == 3);
 
         let mut dq_run = 0;
@@ -670,7 +681,7 @@ mod tests {
 
     macro_rules! test_alone {
         ($text:expr, $val:expr) => {{
-            let mut lexer = Lexer::new($text);
+            let lexer = Lexer::new($text);
             assert_eq!(lexer.next(), Ok(tok($val, pos(1, 1))));
             assert_eq!(lexer.next(), eof());
             ();
@@ -710,7 +721,7 @@ mod tests {
     #[test]
     fn lexer_cr_does_not_change_pos() {
         let text = "\r\r  ";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(CarriageReturn, pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(CarriageReturn, pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 1))));
@@ -731,7 +742,7 @@ mod tests {
     #[test]
     fn lexer_unicode_bom_does_not_change_pos() {
         let text = "\u{FEFF}\u{FEFF}  ";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(UnicodeBom, pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(UnicodeBom, pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 1))));
@@ -752,14 +763,14 @@ mod tests {
     #[test]
     fn lexer_no_tokens() {
         let text = "";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), eof());
     }
 
     #[test]
     fn lexer_empty_string_literal() {
         let text = "a\"\"b";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(Name("a"), pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(StringLit("\"\""), pos(1, 2))));
         assert_eq!(lexer.next(), Ok(tok(Name("b"), pos(1, 4))));
@@ -769,7 +780,7 @@ mod tests {
     #[test]
     fn lexer_comment_at_eof() {
         let text = "hi # yea";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(Name("hi"), pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 3))));
         assert_eq!(lexer.next(), Ok(tok(Comment("# yea"), pos(1, 4))));
@@ -779,7 +790,7 @@ mod tests {
     #[test]
     fn lexer_comment_followed_by_newline() {
         let text = "hi # yea\nok";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(Name("hi"), pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 3))));
         assert_eq!(lexer.next(), Ok(tok(Comment("# yea"), pos(1, 4))));
@@ -791,7 +802,7 @@ mod tests {
     #[test]
     fn lexer_multiple_spaces() {
         let text = "   ";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 2))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 3))));
@@ -801,7 +812,7 @@ mod tests {
     #[test]
     fn lexer_multiple_names() {
         let text = "a b c";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(Name("a"), pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 2))));
         assert_eq!(lexer.next(), Ok(tok(Name("b"), pos(1, 3))));
@@ -819,7 +830,7 @@ mod tests {
     #[test]
     fn lexer_neg_int_alone() {
         let text = "-123";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(IntLit("-123"), pos(1, 1))));
         assert_eq!(lexer.next(), eof());
     }
@@ -833,7 +844,7 @@ mod tests {
     #[test]
     fn lexer_neg_float_alone() {
         let text = "-1.23";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(FloatLit("-1.23"), pos(1, 1))));
         assert_eq!(lexer.next(), eof());
     }
@@ -856,7 +867,7 @@ mod tests {
     #[test]
     fn lexer_float_partial_exponent() {
         let text = "-1.23e-";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(
             lexer.next(),
             Err(LexerError::InvalidToken {
@@ -871,7 +882,7 @@ mod tests {
     #[test]
     fn lexer_float_missing_exponent() {
         let text = "-1.23e";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(
             lexer.next(),
             Err(LexerError::InvalidToken {
@@ -886,7 +897,7 @@ mod tests {
     #[test]
     fn lexer_float_touching_e_name() {
         let text = "-1.23emu-1234";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(
             lexer.next(),
             Err(LexerError::InvalidToken {
@@ -901,7 +912,7 @@ mod tests {
     #[test]
     fn lexer_float_touching_non_e_name() {
         let text = "-1.23blep";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(
             lexer.next(),
             Err(LexerError::InvalidToken {
@@ -969,7 +980,7 @@ mod tests {
     #[test]
     fn lexer_empty_schema() {
         let text = "schema{}";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(Name("schema"), pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(OpenCurly, pos(1, 7))));
         assert_eq!(lexer.next(), Ok(tok(CloseCurly, pos(1, 8))));
@@ -984,7 +995,7 @@ mod tests {
   age
   picture
 }";
-        let mut lexer = Lexer::new(text.trim());
+        let lexer = Lexer::new(text.trim());
         // line 1 - {
         assert_eq!(lexer.next(), Ok(tok(OpenCurly, pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(Newline, pos(1, 2))));
@@ -1014,7 +1025,7 @@ mod tests {
     #[test]
     fn lexer_list_of_int_lits() {
         let text = "[1, 2, 3]";
-        let mut lexer = Lexer::new(text);
+        let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(OpenBracket, pos(1, 1))));
         assert_eq!(lexer.next(), Ok(tok(IntLit("1"), pos(1, 2))));
         assert_eq!(lexer.next(), Ok(tok(Comma, pos(1, 3))));
