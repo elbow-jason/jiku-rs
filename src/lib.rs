@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![feature(cell_update)]
 
 // turns source text into an iterator of lexed tokens.
 mod lexer;

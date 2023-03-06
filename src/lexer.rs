@@ -4,6 +4,7 @@
 //! The high-level entry point for this module is [`LexerIter`](struct.Lexer.html).
 //! The
 
+use std::cell::Cell;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -181,12 +182,39 @@ impl<'a> Iterator for LexerIter<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct State {
+    offset: usize,
+    pos: Pos,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            offset: 0,
+            pos: Pos::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StateCell {
+    state: Cell<State>,
+}
+
+impl Default for StateCell {
+    fn default() -> StateCell {
+        StateCell {
+            state: Cell::new(State::default()),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Lexer<'a> {
     text: &'a str,
     chars: Peekable<Chars<'a>>,
-    offset: usize,
-    pos: Pos,
+    cell: StateCell,
 }
 
 impl<'a> Lexer<'a> {
@@ -194,27 +222,34 @@ impl<'a> Lexer<'a> {
         Lexer {
             text,
             chars: text.chars().peekable(),
-            offset: 0,
-            pos: Pos::default(),
+            cell: StateCell::default(),
         }
     }
 
     fn next_char(&mut self) -> Result<char, LexerError> {
         let c = self.chars.next().ok_or(LexerError::EOF)?;
-        self.offset += c.len_utf8();
-        self.pos = self.pos.update_char(c);
+        self.cell.state.update(|mut state| {
+            state.offset += c.len_utf8();
+            state.pos = state.pos.update_char(c);
+            state
+        });
+
         Ok(c)
     }
 
     #[inline(always)]
     fn update_pos(&mut self, c: char) {
-        self.pos = self.pos.update_char(c);
+        self.cell.state.update(|mut state| {
+            state.pos = state.pos.update_char(c);
+            state
+        });
     }
 
     pub fn next(&mut self) -> Result<Token<'a>, LexerError> {
         // capture the pos and offset before we call next_char - next_char updates the pos and offset.
-        let pos = self.pos;
-        let offset = self.offset;
+        // let pos = self.pos;
+        // let offset = self.offset;
+        let State { offset, pos } = self.cell.state.get();
         let c = self.next_char()?;
 
         use TokenValue::*;
@@ -405,8 +440,11 @@ impl<'a> Lexer<'a> {
         loop {
             match self.chars.next_if(|c| f(*c)) {
                 Some(c) => {
-                    self.offset += c.len_utf8();
-                    self.pos = self.pos.update_char(c);
+                    self.cell.state.update(|mut state| {
+                        state.offset += c.len_utf8();
+                        state.pos = state.pos.update_char(c);
+                        state
+                    });
                     count += 1;
                 }
                 None => break,
