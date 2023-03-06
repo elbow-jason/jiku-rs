@@ -193,6 +193,7 @@ struct Word {
 }
 
 impl Word {
+    #[inline]
     fn add(mut self, more_len: usize) -> Word {
         self.len += more_len;
         self
@@ -267,12 +268,15 @@ impl<'a> Lexer<'a> {
         // let pos = self.pos;
         // let offset = self.offset;
         let State { offset, pos } = self.cell.state.get();
+
+        let c = self.next_char()?;
+
         let word = Word {
             offset,
             pos,
-            len: 0,
+            // the self.next_char() call above makes the len==1.
+            len: 1,
         };
-        let c = self.next_char()?;
 
         use TokenValue::*;
         let val = match c {
@@ -293,14 +297,14 @@ impl<'a> Lexer<'a> {
             '&' => Ampersand,
             '!' => Bang,
             '|' => Pipe,
-            '.' => self.rest_three_dots(word.add(1))?,
-            '$' => self.rest_variable_name(word.add(1))?,
-            '@' => self.rest_directive_name(word.add(1))?,
-            '"' => self.rest_string_or_block_string(offset, pos)?,
-            '#' => self.rest_comment(offset),
-            '-' => self.next_number(offset, pos, true)?,
-            i if i.is_numeric() => self.next_number(offset, pos, false)?,
-            s if char_starts_name(s) => self.rest_name(offset),
+            '.' => self.rest_three_dots(word)?,
+            '$' => self.rest_variable_name(word)?,
+            '@' => self.rest_directive_name(word)?,
+            '"' => self.rest_string_or_block_string(word)?,
+            '#' => self.rest_comment(word),
+            '-' => self.next_number(word, true)?,
+            i if i.is_numeric() => self.next_number(word, false)?,
+            s if char_starts_name(s) => self.rest_name(word),
 
             _ => panic!("unhandled char: {:?}", c),
         };
@@ -379,23 +383,20 @@ impl<'a> Lexer<'a> {
         Ok(name)
     }
 
+    fn lone_minus_check(&self, word: Word, is_neg: bool) -> Result<(), LexerError> {
+        if is_neg && word.len == 1 {
+            return self.invalid(word, "unexpected minus/dash");
+        }
+        Ok(())
+    }
+
     fn next_number(
         &mut self,
-        offset: usize,
-        pos: Pos,
+        mut word: Word,
         is_neg: bool,
     ) -> Result<TokenValueStr<'a>, LexerError> {
-        let mut len = 1 + self.consume_while(|c| c.is_numeric());
-        let minus_error = || -> Result<(), LexerError> {
-            if is_neg && len == 1 {
-                return Err(LexerError::InvalidToken {
-                    word: "-".to_string(),
-                    pos,
-                    message: "unexpected minus",
-                });
-            }
-            Ok(())
-        };
+        debug_assert!(word.len == 1);
+        word = word.add(self.consume_while(|c| c.is_numeric()));
 
         loop {
             match self.peek() {
@@ -403,17 +404,16 @@ impl<'a> Lexer<'a> {
                     // the number is a float! or invalid.
                     // consume the period and inc the len
                     _ = self.next_char();
-                    len += 1;
-                    return self.rest_float_mantissa(offset, pos, len);
+                    word = word.add(1);
+                    return self.rest_float_mantissa(word);
                 }
 
                 Some('e' | 'E') => {
                     // it's an int with an exponent e.g. 10e50 (gj graphql)
-                    return self.rest_float_exponent(offset, pos, len);
+                    return self.rest_float_exponent(word);
                 }
                 Some(c) if char_terminates_number(c) => {
-                    minus_error()?;
-                    let word = Word { pos, offset, len };
+                    self.lone_minus_check(word, is_neg)?;
                     let int = self.slice(word);
                     return Ok(TokenValue::IntLit(int));
                 }
@@ -422,17 +422,16 @@ impl<'a> Lexer<'a> {
                     // the number is an integer or invalid.
                     // if the number was negative and the len is 1 then we
                     // have a '-'; that's not a valid int.
-                    minus_error()?;
+                    self.lone_minus_check(word, is_neg)?;
+
                     // as long as the number is not '-' we have an integer.
-                    let word = Word { pos, offset, len };
                     let int = self.slice(word);
                     debug_assert!(int.parse::<i64>().is_ok(), "{:?}", int);
                     return Ok(TokenValue::IntLit(int));
                 }
                 Some(_) => {
-                    minus_error()?;
-                    len += self.consume_while(char_is_human_word);
-                    let word = Word { pos, offset, len };
+                    self.lone_minus_check(word, is_neg)?;
+                    word = word.add(self.consume_while(char_is_human_word));
                     return self.invalid(word, "invalid number");
                 }
             }
@@ -458,53 +457,40 @@ impl<'a> Lexer<'a> {
         count
     }
 
-    fn rest_float_mantissa(
-        &mut self,
-        offset: usize,
-        pos: Pos,
-        mut len: usize,
-    ) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_float_mantissa(&mut self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         let mantissa_len = self.consume_while(|c| c.is_numeric());
         if mantissa_len == 0 {
-            let word = Word { pos, offset, len };
             return self.invalid(word, "incomplete float - missing mantissa");
         }
-        len += mantissa_len;
-        self.rest_float_exponent(offset, pos, len)
+        word = word.add(mantissa_len);
+        self.rest_float_exponent(word)
     }
 
-    fn rest_float_exponent(
-        &mut self,
-        offset: usize,
-        pos: Pos,
-        mut len: usize,
-    ) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_float_exponent(&mut self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         match self.peek() {
             Some('e' | 'E') => {
                 // it's scientific notation... as long as the next thing is 1 or more digits.
                 _ = self.next_char();
-                len += 1;
+                word = word.add(1);
                 // peek the next char to see if it's a '-' if so we have a negative exponent.
                 match self.peek() {
                     Some('-') => {
                         _ = self.next_char();
-                        len += 1;
+                        word = word.add(1);
                         true
                     }
                     _ => false,
                 };
                 let exponent_len = self.consume_while(|c| c.is_numeric());
                 if exponent_len == 0 {
-                    len += self.consume_while(char_is_human_word);
-                    let word = Word { pos, offset, len };
+                    word = word.add(self.consume_while(char_is_human_word));
                     return self.invalid(word, "invalid float exponent");
                 }
-                len += exponent_len;
+                word = word.add(exponent_len);
                 match self.peek() {
                     Some(c) if c.is_whitespace() => {
                         // the character after the exponent is whitespace.
                         // it's a well-formed float.
-                        let word = Word { pos, offset, len };
                         let float = self.slice(word);
                         debug_assert!(float.parse::<f64>().is_ok());
                         return Ok(TokenValue::FloatLit(float));
@@ -512,7 +498,6 @@ impl<'a> Lexer<'a> {
                     None => {
                         // the last character of the exponent is eof.
                         // it's a well-formed float.
-                        let word = Word { pos, offset, len };
                         let float = self.slice(word);
                         debug_assert!(float.parse::<f64>().is_ok());
                         return Ok(TokenValue::FloatLit(float));
@@ -520,35 +505,23 @@ impl<'a> Lexer<'a> {
                     Some(_) => {
                         // the character after the exponent is not whitespace and not eof.
                         // it's a messed up looking float-like thing.
-                        let word = Word { pos, offset, len };
-                        return Err(LexerError::InvalidToken {
-                            word: self.slice(word.add(1)).into(),
-                            pos,
-                            message: "float exponent is invalid",
-                        });
+                        return self.invalid(word.add(1), "float exponent is invalid");
                     }
                 }
             }
             Some(c) if char_terminates_number(c) => {
                 // the float was complete on the previous char.
-                let word = Word { pos, offset, len };
                 let float = self.slice(word);
                 debug_assert!(float.parse::<f64>().is_ok());
                 return Ok(TokenValue::FloatLit(float));
             }
             Some(_) => {
                 // this float is touching other non-whitespace chars.
-                len += self.consume_while(char_is_human_word);
-                let word = Word { pos, offset, len };
-                return Err(LexerError::InvalidToken {
-                    word: self.slice(word).into(),
-                    pos,
-                    message: "invalid float",
-                });
+                word = word.add(self.consume_while(char_is_human_word));
+                return self.invalid(word, "invalid float");
             }
             None => {
-                // the float as eof.
-                let word = Word { pos, offset, len };
+                // the float is valid and is terminated by eof.
                 let float = self.slice(word);
                 debug_assert!(float.parse::<f64>().is_ok());
                 return Ok(TokenValue::FloatLit(float));
@@ -556,54 +529,36 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn rest_name(&mut self, offset: usize) -> TokenValueStr<'a> {
-        let len = 1 + self.consume_while(char_continues_name);
-        let word = Word {
-            pos: Pos::default(),
-            offset,
-            len,
-        };
+    fn rest_name(&mut self, mut word: Word) -> TokenValueStr<'a> {
+        debug_assert!(word.len == 1);
+        word = word.add(self.consume_while(char_continues_name));
         let name = self.slice(word);
         TokenValue::Name(name)
     }
 
-    fn rest_comment(&mut self, offset: usize) -> TokenValueStr<'a> {
+    fn rest_comment(&mut self, mut word: Word) -> TokenValueStr<'a> {
+        debug_assert!(word.len == 1);
         // comment is terminated by a newline or EOF.
-        let len = 1 + self.consume_while(|c| c != '\n');
-        let word = Word {
-            pos: Pos::default(),
-            offset,
-            len,
-        };
-
+        word = word.add(self.consume_while(|c| c != '\n'));
         let comment = self.slice(word);
         return TokenValue::Comment(comment);
     }
 
     fn rest_string_or_block_string(
         &mut self,
-        offset: usize,
-        pos: Pos,
+        mut word: Word,
     ) -> Result<TokenValueStr<'a>, LexerError> {
         match self.peek() {
             None => {
                 // this freshly opened string's double-quote was at eof and not complete.
-                // e.g. the text looks like this: "... \"" at eof
-                let word = Word {
-                    pos,
-                    offset,
-                    len: 1,
-                };
-                return Err(LexerError::InvalidToken {
-                    word: self.slice(word).into(),
-                    pos,
-                    message: "unclosed string",
-                });
+                // e.g. the text looks like this: `"hi \""` - there is a double-quote at eof.
+                return self.invalid(word, "unclosed string");
             }
             Some('"') => {
                 // this is either an empty string or the beginning of a block quote or invalid.
                 // we have to peek the next char past our just-peeked '"'
                 _ = self.next_char();
+                word = word.add(1);
 
                 // if the next char is a quote we will attempt to lex a block quote.
                 // if the next char is not a quote then this was an empty string.
@@ -612,19 +567,13 @@ impl<'a> Lexer<'a> {
                     Some('"') => {
                         // it's a block quote!
                         _ = self.next_char();
-                        return self.next_finish_block_string(offset, pos);
+                        word = word.add(1);
+                        return self.next_finish_block_string(word);
                     }
                     Some(_) | None => {
                         // it was an empty string!
-
-                        debug_assert!({
-                            let word = Word {
-                                pos,
-                                offset,
-                                len: 2,
-                            };
-                            self.slice(word) == "\"\""
-                        });
+                        debug_assert!(word.len == 2);
+                        debug_assert!(self.slice(word) == "\"\"");
                         Ok(TokenValue::StringLit("\"\""))
                     }
                 }
@@ -632,40 +581,30 @@ impl<'a> Lexer<'a> {
             Some(_) => {
                 // we encountered a non-quote char. this is the content of
                 // out newly confirmed plain-old string literal.
-                self.next_finish_string(offset, pos)
+                self.next_finish_string(word)
             }
         }
     }
 
-    fn next_finish_string(
-        &mut self,
-        offset: usize,
-        pos: Pos,
-    ) -> Result<TokenValueStr<'a>, LexerError> {
-        let mut len = 1;
+    fn next_finish_string(&mut self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+        debug_assert!(word.len == 1);
         loop {
             match self.next_char() {
                 Err(LexerError::InvalidToken { .. }) => unreachable!(),
                 Err(LexerError::EOF) => {
                     // this string did not close before eof.
-                    let word = Word { pos, offset, len };
-                    return Err(LexerError::InvalidToken {
-                        word: self.slice(word).into(),
-                        pos,
-                        message: "unclosed string",
-                    });
+                    return self.invalid(word, "unclosed string");
                 }
                 Ok('"') => {
                     // the string just closed.
-                    len += 1;
-                    let word = Word { pos, offset, len };
+                    word = word.add(1);
                     let string = self.slice(word);
                     return Ok(TokenValue::StringLit(string));
                 }
                 Ok(c) => {
                     // c is yet another char in the content of the string.
                     // increase the len and continue the loop.
-                    len += c.len_utf8();
+                    word = word.add(c.len_utf8());
                     continue;
                 }
             }
@@ -674,10 +613,10 @@ impl<'a> Lexer<'a> {
 
     fn next_finish_block_string(
         &mut self,
-        offset: usize,
-        pos: Pos,
+        mut word: Word,
     ) -> Result<TokenValueStr<'a>, LexerError> {
-        let mut len = 3;
+        debug_assert!(word.len == 3);
+
         let mut dq_run = 0;
         loop {
             // looking for 3 consecutive quotues
@@ -685,28 +624,26 @@ impl<'a> Lexer<'a> {
                 Err(LexerError::InvalidToken { .. }) => unreachable!(),
                 Err(LexerError::EOF) => {
                     // we encountered eof before the block string closed.
-                    let word = Word { pos, offset, len };
                     return self.invalid(word, "unclosed block string");
                 }
                 Ok('\\') => {
                     // skip the next char (this means that `\"""` results in skip-dq-dq and does not
                     // close the block string.
-                    len += 1;
                     dq_run = 0;
                     _ = self.next_char();
+                    word = word.add(1);
                 }
                 Ok('"') => {
                     dq_run += 1;
-                    len += 1;
+                    word = word.add(1);
                     if dq_run == 3 {
                         // the block string just closed.
-                        let word = Word { pos, offset, len };
                         let block_string = self.slice(word);
                         return Ok(TokenValue::BlockStringLit(block_string));
                     }
                 }
                 Ok(c) => {
-                    len += c.len_utf8();
+                    word = word.add(c.len_utf8());
                     dq_run = 0;
                 }
             }
