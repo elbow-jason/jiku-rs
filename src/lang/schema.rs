@@ -5,6 +5,14 @@ pub struct SchemaDoc<'a> {
     pub definitions: Vec<SchemaTopLevelDefinition<'a>>,
 }
 
+impl<'a> SchemaDoc<'a> {
+    pub fn new() -> SchemaDoc<'a> {
+        SchemaDoc {
+            definitions: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SchemaTopLevelDefinition<'a> {
     SchemaDef(SchemaDef<'a>),

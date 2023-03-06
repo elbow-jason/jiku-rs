@@ -143,41 +143,41 @@ pub enum LexerError {
     },
 }
 
-#[derive(Clone)]
-pub struct LexerIter<'a> {
-    done: bool,
-    lexer: Lexer<'a>,
-}
+// #[derive(Clone)]
+// pub struct LexerIter<'a> {
+//     done: bool,
+//     lexer: Lexer<'a>,
+// }
 
-impl<'a> LexerIter<'a> {
-    pub fn new(text: &'a str) -> LexerIter<'a> {
-        LexerIter {
-            done: false,
-            lexer: Lexer::new(text),
-        }
-    }
-}
+// impl<'a> LexerIter<'a> {
+//     pub fn new(text: &'a str) -> LexerIter<'a> {
+//         LexerIter {
+//             done: false,
+//             lexer: Lexer::new(text),
+//         }
+//     }
+// }
 
-impl<'a> Iterator for LexerIter<'a> {
-    type Item = Result<Token<'a>, LexerError>;
+// impl<'a> Iterator for LexerIter<'a> {
+//     type Item = Result<Token<'a>, LexerError>;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-        match self.lexer.next() {
-            Ok(tok) => Some(Ok(tok)),
-            // it's done without err
-            Err(e) => {
-                self.done = true;
-                match &e {
-                    LexerError::EOF => None,
-                    _ => Some(Err(e)),
-                }
-            }
-        }
-    }
-}
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if self.done {
+//             return None;
+//         }
+//         match self.lexer.next() {
+//             Ok(tok) => Some(Ok(tok)),
+//             // it's done without err
+//             Err(e) => {
+//                 self.done = true;
+//                 match &e {
+//                     LexerError::EOF => None,
+//                     _ => Some(Err(e)),
+//                 }
+//             }
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, Copy)]
 struct Word {
@@ -292,14 +292,36 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn next_char(&self) -> Result<char, LexerError> {
-        self.cell.next_char(self.text).ok_or(LexerError::EOF)
-    }
-
     // #[inline(always)]
     // fn update_pos(&mut self, c: char) {
     //     self.cell.update_pos(c);
     // }
+
+    pub fn peek(&self) -> Result<Token<'a>, LexerError> {
+        // capture the state.
+        // get the next.
+        // overwrite the state after next with the original state.
+        let state = self.cell.state.get();
+        let peeked = self.next();
+        _ = self.cell.state.swap(&Cell::new(state));
+        peeked
+    }
+
+    pub fn next_if<F: Fn(&Result<Token<'a>, LexerError>) -> bool>(
+        &self,
+        f: F,
+    ) -> Option<Result<Token<'a>, LexerError>> {
+        let state = self.cell.state.get();
+        let next = self.next();
+        if f(&next) {
+            // if the next is good we leave the state as updated.
+            Some(next)
+        } else {
+            // if the next was not good we reset the state
+            self.cell.state.swap(&Cell::new(state));
+            None
+        }
+    }
 
     pub fn next(&self) -> Result<Token<'a>, LexerError> {
         // capture the pos and offset before we call next_char -
@@ -355,8 +377,12 @@ impl<'a> Lexer<'a> {
         &self.text[word.offset..word.offset + word.len]
     }
 
-    fn peek(&self) -> Option<char> {
+    fn peek_char(&self) -> Option<char> {
         self.cell.peek(self.text)
+    }
+
+    fn next_char(&self) -> Result<char, LexerError> {
+        self.cell.next_char(self.text).ok_or(LexerError::EOF)
     }
 
     fn rest_three_dots(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
@@ -365,7 +391,7 @@ impl<'a> Lexer<'a> {
             word = word.add(self.consume_while(char_is_human_word));
             return self.invalid(word, "expected exactly 3 dots");
         }
-        match self.peek() {
+        match self.peek_char() {
             Some(c) if char_starts_name(c) => {
                 let frag = self.full_name_str(word, "invalid fragment")?;
                 Ok(TokenValue::Fragment(frag))
@@ -396,7 +422,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn full_name_str(&self, mut word: Word, message: &'static str) -> Result<&'a str, LexerError> {
-        match self.peek() {
+        match self.peek_char() {
             Some(c) if char_starts_name(c) => {
                 // it's a name!
                 _ = self.next_char();
@@ -430,7 +456,7 @@ impl<'a> Lexer<'a> {
         word = word.add(self.consume_while(|c| c.is_numeric()));
 
         loop {
-            match self.peek() {
+            match self.peek_char() {
                 Some('.') => {
                     // the number is a float! or invalid.
                     // consume the period and inc the len
@@ -484,13 +510,13 @@ impl<'a> Lexer<'a> {
     }
 
     fn rest_float_exponent(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
-        match self.peek() {
+        match self.peek_char() {
             Some('e' | 'E') => {
                 // it's scientific notation... as long as the next thing is 1 or more digits.
                 _ = self.next_char();
                 word = word.add(1);
                 // peek the next char to see if it's a '-' if so we have a negative exponent.
-                match self.peek() {
+                match self.peek_char() {
                     Some('-') => {
                         _ = self.next_char();
                         word = word.add(1);
@@ -504,7 +530,7 @@ impl<'a> Lexer<'a> {
                     return self.invalid(word, "invalid float exponent");
                 }
                 word = word.add(exponent_len);
-                match self.peek() {
+                match self.peek_char() {
                     Some(c) if c.is_whitespace() => {
                         // the character after the exponent is whitespace.
                         // it's a well-formed float.
@@ -562,7 +588,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn rest_string_or_block_string(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
-        match self.peek() {
+        match self.peek_char() {
             None => {
                 // this freshly opened string's double-quote was at eof and not complete.
                 // e.g. the text looks like this: `"hi \""` - there is a double-quote at eof.
@@ -577,7 +603,7 @@ impl<'a> Lexer<'a> {
                 // if the next char is a quote we will attempt to lex a block quote.
                 // if the next char is not a quote then this was an empty string.
                 // if the next char is eof then this was an empty string at eof.
-                match self.peek() {
+                match self.peek_char() {
                     Some('"') => {
                         // it's a block quote!
                         _ = self.next_char();
@@ -1050,10 +1076,14 @@ mod tests {
         assert!(paths.len() > 0);
         for path in paths {
             let data = fs::read_to_string(&path).unwrap();
-            let mut it = LexerIter::new(&data[..]);
-            while let Some(res) = it.next() {
-                if res.is_err() {
-                    panic!("lexer failed on fixture {:?}: {:?}", path, res.unwrap_err());
+            let it = Lexer::new(&data[..]);
+            loop {
+                match it.next() {
+                    Ok(_) => continue,
+                    Err(LexerError::EOF) => break,
+                    Err(e) => {
+                        panic!("lexer failed on fixture {:?}: {:?}", path, e);
+                    }
                 }
             }
         }

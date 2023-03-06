@@ -1,10 +1,8 @@
-use std::cell::RefCell;
-use std::iter::Peekable;
-use std::ops::Deref;
-
+#[allow(unused_imports)]
+//
 use crate::{
-    DirectiveName, LexerError, LexerIter, Pos, SchemaDoc, SchemaTopLevelDefinition, Token,
-    TokenValue, TypeName, Value,
+    DirectiveName, Lexer, LexerError, Pos, SchemaDoc, SchemaTopLevelDefinition, Token, TokenValue,
+    TypeName, Value,
 };
 use thiserror::Error as ThisError;
 
@@ -42,41 +40,29 @@ type Res<T> = std::result::Result<T, Error>;
 // The context-holding structure for parsing schemas
 #[derive(Clone)]
 struct SchemaParser<'a> {
-    lexer: Peekable<LexerIter<'a>>,
+    lexer: Lexer<'a>,
     config: ParserConfig,
-    definitions: Vec<SchemaTopLevelDefinition<'a>>,
+    // definitions: Vec<SchemaTopLevelDefinition<'a>>,
 }
 
 impl<'a> SchemaParser<'a> {
-    fn new(lexer: LexerIter<'a>, config: ParserConfig) -> SchemaParser<'a> {
+    fn new(lexer: Lexer<'a>, config: ParserConfig) -> SchemaParser<'a> {
         SchemaParser {
-            lexer: lexer.peekable(),
+            lexer,
             config,
-            definitions: Vec::new(),
+            // definitions: Vec::new(),
         }
     }
 
-    fn into_schema_doc(self) -> SchemaDoc<'a> {
-        SchemaDoc {
-            definitions: self.definitions,
-        }
+    fn next(&self) -> Res<Token<'a>> {
+        self.lexer.next().map_err(SchemaParserError::LexerError)
     }
 
-    fn next(&mut self) -> Option<Res<Token<'a>>> {
-        self.lexer
-            .next()
-            .map(|res| res.map_err(SchemaParserError::LexerError))
+    fn peek(&self) -> Res<Token<'a>> {
+        self.lexer.peek().map_err(SchemaParserError::LexerError)
     }
 
-    fn peek(&mut self) -> Option<Res<Token<'a>>> {
-        self.lexer.peek().map(|res| {
-            res.as_ref()
-                .map_err(|e| SchemaParserError::LexerError(e.clone()))
-                .map(|t| t.clone())
-        })
-    }
-
-    fn discard_whitespace(&mut self) {
+    fn discard_whitespace(&self) {
         use TokenValue::*;
         _ = self.lexer.next_if(|res| {
             res.as_ref()
@@ -93,13 +79,14 @@ pub fn parse_schema<'a>(text: &'a str) -> Res<SchemaDoc<'a>> {
 }
 
 pub fn parse_schema_with_config<'a>(text: &'a str, config: ParserConfig) -> Res<SchemaDoc<'a>> {
-    let lexer = LexerIter::new(&text[..]);
+    let lexer = Lexer::new(&text[..]);
+    let mut doc = SchemaDoc::new();
     let p1 = SchemaParser::new(lexer, config);
-    let p2 = parse_top_level(p1)?;
-    Ok(p2.into_schema_doc())
+    parse_top_level(&p1, &mut doc)?;
+    Ok(doc)
 }
 
-fn parse_top_level<'a>(p: SchemaParser<'a>) -> Res<SchemaParser<'a>> {
+fn parse_top_level<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
     // We have been handed a parser that is *supposed* to be at the top level.
     // we need to peek the next token and figure out what to parse next. This
     // function is the entry point for the work of parsing all definitions in a
@@ -112,9 +99,9 @@ fn parse_top_level<'a>(p: SchemaParser<'a>) -> Res<SchemaParser<'a>> {
     // Instead, prefer returning an intermediate builder structure that can be
     // initialized, built up, and then converted into its well-formed, public
     // data structure.
-    let ctx = RefCell::new(p);
+
     loop {
-        let res = _parse_top_level_once(&ctx);
+        let res = _parse_top_level_once(p, doc);
         match res {
             Ok(()) => continue,
             Err(err) => return Err(err),
@@ -122,19 +109,15 @@ fn parse_top_level<'a>(p: SchemaParser<'a>) -> Res<SchemaParser<'a>> {
     }
 }
 
-fn _parse_top_level_once<'a>(ctx: &RefCell<SchemaParser<'a>>) -> Res<()> {
-    {
-        let mut p = ctx.borrow_mut();
-        _ = p.discard_whitespace();
-    };
+fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+    _ = p.discard_whitespace();
 
     let func = {
-        let mut p = ctx.borrow_mut();
         match p.peek() {
-            Some(Ok(tok)) => {
+            Ok(tok) => {
                 use TokenValue::*;
                 match tok.value() {
-                    Name("schema") => |p2| parse_schema_def(p2),
+                    Name("schema") => parse_schema_def,
                     value => {
                         return Err(SchemaParserError::UnexpectedToken {
                             value: value.into(),
@@ -143,15 +126,15 @@ fn _parse_top_level_once<'a>(ctx: &RefCell<SchemaParser<'a>>) -> Res<()> {
                     }
                 }
             }
-            Some(Err(err)) => return Err(err),
-            None => return Ok(()),
+            Err(SchemaParserError::LexerError(LexerError::EOF)) => return Ok(()),
+            Err(e) => return Err(e),
         }
     };
-    let mut p = ctx.borrow_mut();
-    func(&mut p)
+    func(p, doc)
 }
 
-fn parse_schema_def<'a>(parser: &mut SchemaParser<'a>) -> Res<()> {
+fn parse_schema_def<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+    _ = (p, doc);
     Ok(())
 }
 
