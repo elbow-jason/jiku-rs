@@ -1,27 +1,37 @@
 use std::collections::BTreeMap;
 
-use crate::Pos;
+use crate::{Pos, Token, TokenValue};
 use ord_float::Float64;
-#[derive(Debug, Clone, Eq, PartialOrd, Ord, Hash)]
-pub struct Name<'a> {
-    pub value: &'a str,
-    pub pos: Pos,
-}
+// use std::ops::Deref;
 
-impl<'a> PartialEq for Name<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
+// #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+// pub struct Name<'a>(pub &'a str);
+
+// impl<'a> Deref for Name<'a> {
+//     type Target = str;
+//     fn deref(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TypeName<'a>(pub &'a str);
+
+impl<'a> From<Token<'a>> for TypeName<'a> {
+    fn from(token: Token<'a>) -> Self {
+        let val = match token.val {
+            TokenValue::Name(name) => name,
+            _ => unreachable!(),
+        };
+        TypeName(val)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TypeName<'a>(Name<'a>);
+pub struct DirectiveName<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DirectiveName<'a>(pub Name<'a>);
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VariableName<'a>(pub Name<'a>);
+pub struct VariableName<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Value<'a> {
@@ -53,7 +63,7 @@ enum ValueInner<'a> {
     Object(Map<'a>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Directive<'a> {
     pub name: DirectiveName<'a>,
     pub arguments: Vec<(&'a str, Value<'a>)>,

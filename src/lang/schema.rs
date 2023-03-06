@@ -13,7 +13,7 @@ impl<'a> SchemaDoc<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SchemaTopLevelDefinition<'a> {
     SchemaDef(SchemaDef<'a>),
     TypeDef(TypeDef<'a>),
@@ -21,27 +21,27 @@ pub enum SchemaTopLevelDefinition<'a> {
     DirectiveDef(DirectiveDef<'a>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectiveDef<'a> {
     pub name: DirectiveName<'a>,
     // pub arguments: Vec<Argument<'a>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TypeDef<'a> {
     pub name: TypeName<'a>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeExt<'a> {
     pub name: TypeName<'a>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SchemaDef<'a> {
-    pub position: Pos,
+    pub pos: Pos,
     pub directives: Vec<Directive<'a>>,
-    pub query: Option<&'a str>,
-    pub mutation: Option<&'a str>,
-    pub subscription: Option<&'a str>,
+    pub query: Option<TypeName<'a>>,
+    pub mutation: Option<TypeName<'a>>,
+    pub subscription: Option<TypeName<'a>>,
 }

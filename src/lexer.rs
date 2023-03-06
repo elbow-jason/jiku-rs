@@ -105,7 +105,37 @@ pub enum TokenValue<T: AsRef<str>> {
 
 impl From<TokenValue<&str>> for TokenValue<String> {
     fn from(v: TokenValue<&str>) -> TokenValue<String> {
-        v.into()
+        use TokenValue::*;
+        match v {
+            StringLit(s) => StringLit(s.to_string()),
+            BlockStringLit(s) => BlockStringLit(s.to_string()),
+            Name(s) => Name(s.to_string()),
+            IntLit(s) => IntLit(s.to_string()),
+            FloatLit(s) => FloatLit(s.to_string()),
+            DirectiveName(s) => DirectiveName(s.to_string()),
+            Fragment(s) => Fragment(s.to_string()),
+            VariableName(s) => VariableName(s.to_string()),
+            Comment(s) => Comment(s.to_string()),
+            // never ever ever do x => x.into()
+            OpenParen => OpenParen,
+            CloseParen => CloseParen,
+            OpenCurly => OpenCurly,
+            CloseCurly => CloseCurly,
+            OpenBracket => OpenBracket,
+            CloseBracket => CloseBracket,
+            Colon => Colon,
+            ThreeDots => ThreeDots,
+            EqualSign => EqualSign,
+            Ampersand => Ampersand,
+            Bang => Bang,
+            Pipe => Pipe,
+            Space => Space,
+            Newline => Newline,
+            CarriageReturn => CarriageReturn,
+            Comma => Comma,
+            Tab => Tab,
+            UnicodeBom => UnicodeBom,
+        }
     }
 }
 
@@ -113,21 +143,13 @@ type TokenValueStr<'a> = TokenValue<&'a str>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token<'a> {
-    val: TokenValue<&'a str>,
-    pos: Pos,
+    pub val: TokenValue<&'a str>,
+    pub pos: Pos,
 }
 
 impl<'a> Token<'a> {
     fn new(val: TokenValueStr<'a>, pos: Pos) -> Self {
         Token { val, pos }
-    }
-
-    pub fn value(&self) -> TokenValueStr<'a> {
-        self.val
-    }
-
-    pub fn pos(&self) -> Pos {
-        self.pos
     }
 }
 
@@ -305,6 +327,17 @@ impl<'a> Lexer<'a> {
         let peeked = self.next();
         _ = self.cell.state.swap(&Cell::new(state));
         peeked
+    }
+
+    pub fn peek_fill(&self, container: &mut [Option<Token<'a>>]) {
+        let state = self.cell.state.get();
+        for slot in container.iter_mut() {
+            match self.next() {
+                Ok(token) => *slot = Some(token),
+                Err(_) => break,
+            }
+        }
+        _ = self.cell.state.swap(&Cell::new(state));
     }
 
     pub fn next_if<F: Fn(&Result<Token<'a>, LexerError>) -> bool>(
