@@ -30,11 +30,11 @@ pub enum SchemaParserError {
     #[error("schema text size limit exceeded - limit: {limit:?}, text_size: {text_size:?}")]
     TextSizeLimitExceeded { limit: usize, text_size: usize },
 
-    #[error("unexpected token: {value:?} {pos:?}")]
+    #[error("unexpected token: {value:?} {pos:?} {message:?}")]
     UnexpectedToken {
         value: TokenValue<String>,
         pos: Pos,
-        message: Option<&'static str>,
+        message: &'static str,
     },
 
     #[error("schema lexer error: {_0:?}")]
@@ -46,22 +46,21 @@ pub enum SchemaParserError {
         pos: Pos,
         message: &'static str,
     },
+
+    #[error("syntax error: {value:?} {pos:?}")]
+    SyntaxError {
+        value: TokenValue<String>,
+        pos: Pos,
+        message: &'static str,
+    },
 }
 
 impl SchemaParserError {
-    fn unexpected<'a>(token: Token<'a>) -> SchemaParserError {
-        SchemaParserError::UnexpectedToken {
-            value: token.val.into(),
+    fn syntax<'a>(token: Token<'a>, message: &'static str) -> SchemaParserError {
+        SchemaParserError::SyntaxError {
+            value: TokenValue::<String>::from(token.val),
             pos: token.pos,
-            message: None,
-        }
-    }
-
-    fn unexpected_with_message<'a>(token: Token<'a>, message: &'static str) -> SchemaParserError {
-        SchemaParserError::UnexpectedToken {
-            value: token.val.into(),
-            pos: token.pos,
-            message: Some(message),
+            message,
         }
     }
 
@@ -173,7 +172,7 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
                 Name("input") => parse_input_object_type(p, doc),
                 _ => {
                     let message = "not a top-level token";
-                    return Err(SchemaParserError::unexpected_with_message(tok, message));
+                    return Err(SchemaParserError::syntax(tok, message));
                 }
             }
         }
@@ -183,19 +182,11 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
 }
 
 macro_rules! required {
-    // ($p:expr, $val:pat) => {{
-    //     use TokenValue::*;
-    //     match $p.next() {
-    //         ok_tok @ Ok(Token { val: $val, .. }) => ok_tok,
-    //         Ok(tok) => Err(Error::unexpected(tok)),
-    //         Err(e) => Err(e.into()),
-    //     }
-    // }};
     ($p:expr, $val:pat, $message:expr) => {{
         use TokenValue::*;
         match $p.next() {
             ok_tok @ Ok(Token { val: $val, .. }) => ok_tok,
-            Ok(tok) => Err(Error::unexpected_with_message(tok, $message)),
+            Ok(tok) => Err(Error::syntax(tok, $message)),
             Err(e) => Err(e.into()),
         }
     }};
@@ -261,7 +252,7 @@ fn parse_input_fields<'a>(p: &SchemaParser<'a>) -> Res<Vec<InputValueDef<'a>>> {
             }
             _ => {
                 let message = "not an input object field";
-                return Err(Error::unexpected_with_message(tok, message));
+                return Err(Error::syntax(tok, message));
             }
         }
     }
@@ -308,7 +299,7 @@ fn parse_type<'a>(p: &SchemaParser<'a>) -> Res<Type<'a>> {
             let name = required!(p, Name(_), "type requires a name").unwrap();
             Type::Name(TypeName::from(name))
         }
-        _ => return Err(Error::unexpected_with_message(tok, "type name")),
+        _ => return Err(Error::syntax(tok, "type name")),
     };
     let bang = optional!(p, Bang)?;
     if bang.is_some() {
@@ -377,12 +368,7 @@ fn parse_schema_def<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()
                     doc.definitions.push(def);
                     return Ok(());
                 }
-                _ => {
-                    return Err(Error::unexpected_with_message(
-                        field_tok,
-                        "invalid schema definition",
-                    ))
-                }
+                _ => return Err(Error::syntax(field_tok, "invalid schema definition")),
             },
             Err(e) => return Err(e.into()),
         }
@@ -412,7 +398,7 @@ fn parse_directives<'a>(p: &SchemaParser<'a>) -> Res<Vec<Directive<'a>>> {
 
 fn parse_rest_directive<'a>(p: &SchemaParser<'a>, tok: Token<'a>) -> Res<Directive<'a>> {
     _ = (p, tok);
-    Err(Error::unexpected_with_message(tok, "parse rest directive"))
+    Err(Error::syntax(tok, "parse rest directive"))
 }
 
 #[cfg(test)]
