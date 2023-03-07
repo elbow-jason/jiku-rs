@@ -2,10 +2,10 @@
 // TODO: add context to parser for tracking/limiting parsing depth.
 //
 use crate::{
-    DefaultValue, Directive, DirectiveName, EnumType, EnumValue, EnumValueName, FieldDef,
-    FieldName, InputObjectType, InputValueDef, InterfaceType, Lexer, LexerError, ObjectType, Pos,
-    ScalarType, SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue, Type, TypeDef, TypeName,
-    UnionType, Value,
+    DefaultValue, Description, Directive, DirectiveName, EnumType, EnumValue, EnumValueName,
+    FieldDef, FieldName, InputObjectType, InputValueDef, InterfaceType, Lexer, LexerError,
+    ObjectType, Pos, ScalarType, SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue, Type,
+    TypeDef, TypeName, UnionType, Value,
 };
 
 use thiserror::Error as ThisError;
@@ -165,26 +165,46 @@ fn parse_top_level<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()>
     }
 }
 
-fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
-    match p.peek() {
-        Ok(tok) => {
-            use TokenValue::*;
-            match tok.val {
-                Name("schema") => parse_schema_def(p, doc),
-                Name("input") => parse_input_object_type(p, doc),
-                Name("type") => parse_object_type(p, doc),
-                Name("scalar") => parse_scalar_type(p, doc),
-                Name("enum") => parse_enum_type(p, doc),
-                Name("interface") => parse_interface_type(p, doc),
-                Name("union") => parse_union_type(p, doc),
-                _ => {
-                    let message = "not a top-level schema identifier";
-                    return Err(SchemaParserError::syntax(tok, message));
-                }
-            }
-        }
+struct Context<'a> {
+    description: Option<Description<'a>>,
+    top_level: Token<'a>,
+    type_name: Option<TypeName<'a>>,
+}
 
-        Err(e) => Err(e),
+fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+    let description = parse_description(p)?;
+    let top_level = p.peek()?;
+    let ctx = Context {
+        top_level,
+        description,
+        type_name: None,
+    };
+
+    match top_level.val {
+        Name("schema") => parse_schema_def(p, doc, ctx),
+        Name("input") => parse_input_object_type(p, doc, ctx),
+        Name("type") => parse_object_type(p, doc, ctx),
+        Name("scalar") => parse_scalar_type(p, doc, ctx),
+        Name("enum") => parse_enum_type(p, doc, ctx),
+        Name("interface") => parse_interface_type(p, doc, ctx),
+        Name("union") => parse_union_type(p, doc, ctx),
+
+        _ => {
+            let message = "not a top-level schema identifier";
+            return Err(SchemaParserError::syntax(top_level, message));
+        }
+    }
+}
+
+fn parse_description<'a>(p: &SchemaParser<'a>) -> Res<Option<Description<'a>>> {
+    let tok = p.peek()?;
+    match &tok.val {
+        StringLit(_) | BlockStringLit(_) => {
+            dbg!("HERE");
+            _ = p.next();
+            Ok(Some(Description { tok }))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -226,16 +246,23 @@ fn replace_none_token<'a>(
     Ok(slot)
 }
 
-fn parse_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+fn parse_object_type<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    mut ctx: Context<'a>,
+) -> Res<()> {
+    // context
+    let description = ctx.description.take();
     let Token { pos, .. } = required!(p, Name("type"), "invalid `type` identifier")?;
     let name = required!(p, Name(_), "invalid object name")?;
+    ctx.type_name = Some(TypeName::from(name));
     let directives = parse_directives(p)?;
     let _ = required!(p, OpenCurly, "object fields block did not open")?;
     let fields = parse_field_defs(p)?;
     let _ = required!(p, CloseCurly, "object fields block did close")?;
     let object_type = ObjectType {
         pos,
-        description: None,
+        description,
         name: TypeName::from(name),
         directives,
         fields,
@@ -246,16 +273,22 @@ fn parse_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<(
     Ok(())
 }
 
-fn parse_interface_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+fn parse_interface_type<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    mut ctx: Context<'a>,
+) -> Res<()> {
+    let description = ctx.description.take();
     let Token { pos, .. } = required!(p, Name("interface"), "invalid `interface` identifier")?;
     let name = required!(p, Name(_), "invalid interface name")?;
+    ctx.type_name = Some(TypeName::from(name));
     let directives = parse_directives(p)?;
     let _ = required!(p, OpenCurly, "interface fields block did not open")?;
     let fields = parse_field_defs(p)?;
     let _ = required!(p, CloseCurly, "interface fields block did close")?;
     let interface_type = InterfaceType {
         pos,
-        description: None,
+        description,
         name: TypeName::from(name),
         directives,
         fields,
@@ -266,17 +299,23 @@ fn parse_interface_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Re
     Ok(())
 }
 
-fn parse_input_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+fn parse_input_object_type<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    mut ctx: Context<'a>,
+) -> Res<()> {
     let Token { pos, .. } = required!(p, Name("input"), "invalid `input` identifier")?;
     let name = required!(p, Name(_), "invalid input object name")?;
+    let type_name = TypeName::from(name);
+    ctx.type_name = Some(type_name);
     let directives = parse_directives(p)?;
     let _ = required!(p, OpenCurly, "input object fields block did not open")?;
     let fields = parse_input_value_defs(p, CloseCurly, "invalid input object field")?;
     let _ = required!(p, CloseCurly, "input object fields block did close")?;
     let input_object_type = InputObjectType {
         pos,
-        description: None,
-        name: name.into(),
+        description: ctx.description,
+        name: type_name,
         directives,
         fields,
     };
@@ -285,13 +324,17 @@ fn parse_input_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) ->
     Ok(())
 }
 
-fn parse_scalar_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+fn parse_scalar_type<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    ctx: Context<'a>,
+) -> Res<()> {
     // https://spec.graphql.org/draft/#sec-Scalars
     let Token { pos, .. } = required!(p, Name("scalar"), "invalid `scalar` identifier")?;
     let name = required!(p, Name(_), "invalid scalar name")?;
     let directives = parse_directives(p)?;
     let scalar_type = ScalarType {
-        description: None,
+        description: ctx.description,
         pos,
         name: TypeName::from(name),
         directives,
@@ -428,7 +471,12 @@ fn parse_type<'a>(p: &SchemaParser<'a>) -> Res<Type<'a>> {
 fn parse_default_value<'a>(_p: &SchemaParser<'a>) -> Res<Option<Value<'a>>> {
     Ok(None)
 }
-fn parse_schema_def<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+fn parse_schema_def<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    mut ctx: Context<'a>,
+) -> Res<()> {
+    let description = ctx.description.take();
     let schema = required!(p, Name("schema"), "expected top-level keyword `schema`")?;
     let directives = parse_directives(p)?;
     let _ = required!(
@@ -480,6 +528,7 @@ fn parse_schema_def<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()
                         mutation: m.map(|t| t.into()),
                         subscription: s.map(|t| t.into()),
                         directives,
+                        description,
                     };
                     let def = SchemaTopLevel::SchemaDef(sd);
                     doc.definitions.push(def);
@@ -555,7 +604,7 @@ fn parse_enum_values<'a>(p: &SchemaParser<'a>) -> Res<Vec<EnumValue<'a>>> {
     }
 }
 
-fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>, ctx: Context<'a>) -> Res<()> {
     // https://spec.graphql.org/draft/#sec-Enums
     let Token { pos, .. } = required!(p, Name("enum"), "invalid `enum` identifier")?;
     let name = required!(p, Name(_), "invalid enum name")?;
@@ -565,7 +614,7 @@ fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()>
     let _ = required!(p, CloseCurly, "object fields block did close")?;
     let enum_type = EnumType {
         pos,
-        description: None,
+        description: ctx.description,
         name: TypeName::from(name),
         directives,
         values,
@@ -575,7 +624,11 @@ fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()>
     Ok(())
 }
 
-fn parse_union_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+fn parse_union_type<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    ctx: Context<'a>,
+) -> Res<()> {
     // https://spec.graphql.org/draft/#sec-Unions
 
     let Token { pos, .. } = required!(p, Name("union"), "invalid `union` identifier")?;
@@ -587,7 +640,7 @@ fn parse_union_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()
 
     let union_type = UnionType {
         pos,
-        description: None,
+        description: ctx.description,
         name: TypeName::from(name),
         directives,
         types,
@@ -652,6 +705,7 @@ mod tests {
             mutation,
             subscription,
             directives,
+            description,
         }) = &doc.definitions[0]
         {
             assert_eq!(*pos, p(1, 1));
@@ -659,6 +713,7 @@ mod tests {
             assert_eq!(*query, None);
             assert_eq!(*mutation, None);
             assert_eq!(*subscription, None);
+            assert_eq!(*description, None);
         } else {
             panic!("not schema definition: {:?}", doc.definitions[0]);
         }
@@ -667,6 +722,7 @@ mod tests {
     #[test]
     fn parses_schema_def_with_all_ops() {
         let text = r#"
+        "some desc"
         schema {query: QueryHere, mutation: MutationHere, subscription: SubscriptionHere}
         "#;
         let doc = parse_schema(text).unwrap();
@@ -677,13 +733,15 @@ mod tests {
             mutation,
             subscription,
             directives,
+            description,
         }) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(1, 1));
+            assert_eq!(*pos, p(2, 9));
             assert_eq!(directives.len(), 0);
             assert_eq!(*query, Some(TypeName("QueryHere")));
             assert_eq!(*mutation, Some(TypeName("MutationHere")));
             assert_eq!(*subscription, Some(TypeName("SubscriptionHere")));
+            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
         } else {
             panic!("not schema definition: {:?}", doc.definitions[0]);
         }

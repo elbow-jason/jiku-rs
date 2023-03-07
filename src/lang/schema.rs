@@ -8,6 +8,12 @@ pub struct Description<'a> {
     pub tok: Token<'a>,
 }
 
+impl<'a> Description<'a> {
+    pub fn as_str(&'a self) -> &'a str {
+        self.tok.as_str()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaDoc<'a> {
     pub definitions: Vec<SchemaTopLevel<'a>>,
@@ -105,13 +111,14 @@ pub struct TypeExt<'a> {
     pub name: TypeName<'a>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SchemaDef<'a> {
     pub pos: Pos,
     pub directives: Vec<Directive<'a>>,
     pub query: Option<TypeName<'a>>,
     pub mutation: Option<TypeName<'a>>,
     pub subscription: Option<TypeName<'a>>,
+    pub description: Option<Description<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

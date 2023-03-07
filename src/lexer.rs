@@ -139,6 +139,64 @@ impl From<TokenValue<&str>> for TokenValue<String> {
     }
 }
 
+impl<'a> TokenValue<&'a str> {
+    pub fn as_str(&'a self) -> &'a str {
+        use TokenValue::*;
+        match self {
+            StringLit(s) | BlockStringLit(s) | Name(s) | IntLit(s) | FloatLit(s)
+            | DirectiveName(s) | Fragment(s) | VariableName(s) | Comment(s) => s,
+            // never ever ever do x => x.into()
+            OpenParen => "(",
+            CloseParen => ")",
+            OpenCurly => "{",
+            CloseCurly => "}",
+            OpenBracket => "[",
+            CloseBracket => "]",
+            Colon => ":",
+            ThreeDots => "...",
+            EqualSign => "=",
+            Ampersand => "&",
+            Bang => "!",
+            Pipe => "|",
+            Space => " ",
+            Newline => "\n",
+            CarriageReturn => "\r",
+            Comma => ",",
+            Tab => "\t",
+            UnicodeBom => "\u{FEFF}",
+        }
+    }
+}
+
+impl TokenValue<String> {
+    pub fn as_str<'a>(&'a self) -> &'a str {
+        use TokenValue::*;
+        match self {
+            StringLit(s) | BlockStringLit(s) | Name(s) | IntLit(s) | FloatLit(s)
+            | DirectiveName(s) | Fragment(s) | VariableName(s) | Comment(s) => s,
+            // never ever ever do x => x.into()
+            OpenParen => "(",
+            CloseParen => ")",
+            OpenCurly => "{",
+            CloseCurly => "}",
+            OpenBracket => "[",
+            CloseBracket => "]",
+            Colon => ":",
+            ThreeDots => "...",
+            EqualSign => "=",
+            Ampersand => "&",
+            Bang => "!",
+            Pipe => "|",
+            Space => " ",
+            Newline => "\n",
+            CarriageReturn => "\r",
+            Comma => ",",
+            Tab => "\t",
+            UnicodeBom => "\u{FEFF}",
+        }
+    }
+}
+
 type TokenValueStr<'a> = TokenValue<&'a str>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +208,10 @@ pub struct Token<'a> {
 impl<'a> Token<'a> {
     fn new(val: TokenValueStr<'a>, pos: Pos) -> Self {
         Token { val, pos }
+    }
+
+    pub fn as_str(&'a self) -> &'a str {
+        self.val.as_str()
     }
 }
 
