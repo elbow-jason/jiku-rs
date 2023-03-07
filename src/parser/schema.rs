@@ -749,7 +749,10 @@ mod tests {
 
     #[test]
     fn parses_input_object_definition() {
-        let text = "input ThingInput { name: String }";
+        let text = r#"
+        "some desc"
+        input ThingInput { name: String }
+        "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
         if let SchemaTopLevel::TypeDef(TypeDef::InputObject(InputObjectType {
@@ -760,8 +763,8 @@ mod tests {
             fields,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(1, 1));
-            assert_eq!(*description, None);
+            assert_eq!(*pos, p(2, 9));
+            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("ThingInput"));
             assert_eq!(*directives, vec![]);
             assert_eq!(fields.len(), 1);
@@ -773,7 +776,7 @@ mod tests {
                 ty,
                 default_value,
             } = &fields[0];
-            assert_eq!(*pos, p(1, 20));
+            assert_eq!(*pos, p(2, 28));
             assert_eq!(*description, None);
             assert_eq!(*name, FieldName("name"));
             assert_eq!(directives.len(), 0);
