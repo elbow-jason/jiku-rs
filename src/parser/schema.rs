@@ -218,7 +218,7 @@ struct Context<'a> {
 }
 
 fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
-    let description = parse_description(p)?;
+    let description = values::parse_description(p);
     let top_level = p.peek()?;
     let ctx = Context {
         description,
@@ -239,17 +239,6 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
             let message = "not a top-level schema identifier";
             return Err(SchemaParserError::syntax(top_level, message));
         }
-    }
-}
-
-fn parse_description<'a>(p: &SchemaParser<'a>) -> Res<Option<Description<'a>>> {
-    let tok = p.peek()?;
-    match &tok.val {
-        StringLit(_) | BlockStringLit(_) => {
-            _ = p.next();
-            Ok(Some(Description { tok }))
-        }
-        _ => Ok(None),
     }
 }
 
@@ -825,7 +814,7 @@ mod tests {
     fn parses_scalar_type() {
         let text = r#"
         "some desc"
-        scalar Thing
+        scalar Thing @someDir(asd: BLEP)
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
@@ -839,7 +828,17 @@ mod tests {
             assert_eq!(*pos, p(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
-            assert_eq!(*directives, vec![]);
+            assert_eq!(
+                *directives,
+                vec![Directive {
+                    location: None,
+                    name: DirectiveName("@someDir"),
+                    arguments: vec![Argument {
+                        name: FieldName("asd"),
+                        value: Value::Enum(EnumValueName("BLEP"))
+                    }]
+                }]
+            );
         } else {
             panic!("not scalar definition: {:?}", doc.definitions[0]);
         }
@@ -887,7 +886,15 @@ mod tests {
     fn parses_enum_type() {
         let text = r#"
         "some desc"
-        enum Thing { GOOD }
+        enum Thing {
+            "it's good"
+            GOOD
+
+            """
+            it's bad
+            """
+            BAD
+        }
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
@@ -903,12 +910,12 @@ mod tests {
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
-            assert_eq!(values.len(), 1);
+            assert_eq!(values.len(), 2);
             let value = &values[0];
-            // value assertions
-            assert_eq!(value.description, None);
+            assert_eq!(value.description.unwrap().as_str(), "\"it's good\"");
+            assert_eq!(value.description.unwrap().tok.pos, p(3, 13));
             assert_eq!(value.name, EnumValueName("GOOD"));
-            assert_eq!(value.pos, p(2, 22));
+            assert_eq!(value.pos, p(4, 13));
             assert_eq!(value.directives.len(), 0);
         } else {
             panic!("not enum definition: {:?}", doc.definitions[0]);

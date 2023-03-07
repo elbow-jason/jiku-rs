@@ -5,8 +5,8 @@
 use super::traits::{Parser, ParserError};
 use crate::{optional, required};
 use crate::{
-    Argument, Directive, DirectiveName as DirName, EnumValue, EnumValueName, FieldName, Float64,
-    Token, TokenValue, Value, VariableName as VarName,
+    Argument, Description, Directive, DirectiveName as DirName, EnumValue, EnumValueName,
+    FieldName, Float64, Token, TokenValue, Value, VariableName as VarName,
 };
 use TokenValue::*;
 
@@ -125,9 +125,22 @@ pub fn parse_directives<'a, P: Parser<'a>>(p: &P) -> Result<Vec<Directive<'a>>, 
     Ok(directives)
 }
 
+pub fn parse_description<'a, P: Parser<'a>>(p: &P) -> Option<Description<'a>> {
+    match p.peek() {
+        Err(_) => None,
+        Ok(tok) => match &tok.val {
+            StringLit(_) | BlockStringLit(_) => {
+                _ = p.next();
+                Some(Description { tok })
+            }
+            _ => None,
+        },
+    }
+}
+
 pub fn parse_enum_value<'a, P: Parser<'a>>(p: &P) -> Result<EnumValue<'a>, P::Error> {
     // https://spec.graphql.org/draft/#EnumValueDefinition
-    let description = None;
+    let description = parse_description(p);
     let name = required!(p, Name(_), "enum value name is required")?;
     let directives = parse_directives(p)?;
     let Token { pos, .. } = name;
@@ -145,12 +158,12 @@ pub fn parse_enum_values<'a, P: Parser<'a>>(p: &P) -> Result<Vec<EnumValue<'a>>,
         let peeked = p.peek()?;
         // look for description or name
         match &peeked.val {
-            Name(_) => {
+            Name(_) | StringLit(_) | BlockStringLit(_) => {
                 let value = parse_enum_value(p)?;
                 values.push(value);
                 continue;
             }
-            StringLit(_) | BlockStringLit(_) => panic!("description not implemented: {:?}", peeked),
+
             CloseCurly => return Ok(values),
             _ => return Err(P::Error::syntax(peeked, "invalid enum value")),
         }
