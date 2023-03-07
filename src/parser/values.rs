@@ -54,8 +54,7 @@ pub fn parse_value<'a, P: Parser<'a>>(p: &P) -> Result<Value<'a>, P::Error> {
     let val = match tok.val {
         StringLit(s) => Value::String(s),
         BlockStringLit(s) => Value::BlockString(s),
-        IntLit(s) => return parse_int::<P>(s, tok),
-        FloatLit(s) => parse_float::<P>(s, tok)?,
+        NumberLit(s) => parse_number::<P>(s, tok)?,
         Name("true") => Value::Boolean(true),
         Name("false") => Value::Boolean(false),
         Name("null") => Value::Null,
@@ -77,6 +76,14 @@ fn parse_rest_object<'a, P: Parser<'a>>(_p: &P) -> Result<Value<'a>, P::Error> {
     todo!()
 }
 
+fn parse_number<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, P::Error> {
+    // numbers with decimal point or exponent is a float else it's an int
+    if s.chars().any(|c| c == '.' || c == 'e' || c == 'E') {
+        parse_float::<P>(s, tok)
+    } else {
+        parse_int::<P>(s, tok)
+    }
+}
 fn parse_int<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, P::Error> {
     s.parse::<i64>()
         .map(From::from)

@@ -67,8 +67,6 @@ pub enum TokenValue<T: AsRef<str>> {
     CarriageReturn,
     Comma,
     Name(T),
-    IntLit(T),
-    FloatLit(T),
     // \u{FEFF}
     UnicodeBom,
     Tab,
@@ -101,6 +99,9 @@ pub enum TokenValue<T: AsRef<str>> {
     Fragment(T),
     // |
     Pipe,
+
+    Unknown(T),
+    NumberLit(T),
 }
 
 impl<'a> TokenValue<&'a str> {
@@ -110,12 +111,12 @@ impl<'a> TokenValue<&'a str> {
             StringLit(s) => StringLit(s.to_string()),
             BlockStringLit(s) => BlockStringLit(s.to_string()),
             Name(s) => Name(s.to_string()),
-            IntLit(s) => IntLit(s.to_string()),
-            FloatLit(s) => FloatLit(s.to_string()),
+            NumberLit(s) => NumberLit(s.to_string()),
             DirectiveName(s) => DirectiveName(s.to_string()),
             Fragment(s) => Fragment(s.to_string()),
             VariableName(s) => VariableName(s.to_string()),
             Comment(s) => Comment(s.to_string()),
+            Unknown(s) => Unknown(s.to_string()),
             // never ever ever do x => x.into()
             OpenParen => OpenParen,
             CloseParen => CloseParen,
@@ -141,8 +142,8 @@ impl<'a> TokenValue<&'a str> {
     pub fn as_str(&'a self) -> &'a str {
         use TokenValue::*;
         match self {
-            StringLit(s) | BlockStringLit(s) | Name(s) | IntLit(s) | FloatLit(s)
-            | DirectiveName(s) | Fragment(s) | VariableName(s) | Comment(s) => s,
+            StringLit(s) | BlockStringLit(s) | Name(s) | DirectiveName(s) | Fragment(s)
+            | VariableName(s) | Comment(s) | Unknown(s) | NumberLit(s) => s,
             // never ever ever do x => x.into()
             OpenParen => "(",
             CloseParen => ")",
@@ -170,8 +171,8 @@ impl TokenValue<String> {
     pub fn as_str<'a>(&'a self) -> &'a str {
         use TokenValue::*;
         match self {
-            StringLit(s) | BlockStringLit(s) | Name(s) | IntLit(s) | FloatLit(s)
-            | DirectiveName(s) | Fragment(s) | VariableName(s) | Comment(s) => s,
+            StringLit(s) | BlockStringLit(s) | Name(s) | DirectiveName(s) | Fragment(s)
+            | VariableName(s) | Comment(s) | Unknown(s) | NumberLit(s) => s,
             // never ever ever do x => x.into()
             OpenParen => "(",
             CloseParen => ")",
@@ -374,11 +375,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    // #[inline(always)]
-    // fn update_pos(&mut self, c: char) {
-    //     self.cell.update_pos(c);
-    // }
-
     pub fn peek(&self) -> Result<Token<'a>, LexerError> {
         // capture the state.
         // get the next.
@@ -457,8 +453,8 @@ impl<'a> Lexer<'a> {
             '@' => self.rest_directive_name(word)?,
             '"' => self.rest_string_or_block_string(word)?,
             '#' => self.rest_comment(word),
-            '-' => self.next_number(word, true)?,
-            i if i.is_numeric() => self.next_number(word, false)?,
+            '-' => self.next_number(word)?,
+            i if i.is_numeric() => self.next_number(word)?,
             s if char_starts_name(s) => self.rest_name(word),
             _ => return self.invalid(word, "encountered invalid character"),
         };
@@ -537,55 +533,57 @@ impl<'a> Lexer<'a> {
         Ok(name)
     }
 
-    fn lone_minus_check(&self, word: Word, is_neg: bool) -> Result<(), LexerError> {
-        if is_neg && word.len == 1 {
-            return self.invalid(word, "unexpected minus/dash");
-        }
-        Ok(())
-    }
-
-    fn next_number(&self, mut word: Word, is_neg: bool) -> Result<TokenValueStr<'a>, LexerError> {
+    fn next_number(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         debug_assert!(word.len == 1);
         word = word.add(self.consume_while(|c| c.is_numeric()));
-
-        loop {
-            match self.peek_char() {
-                Some('.') => {
-                    // the number is a float! or invalid.
-                    // consume the period and inc the len
-                    _ = self.next_char();
-                    word = word.add(1);
-                    return self.rest_float_mantissa(word);
-                }
-
-                Some('e' | 'E') => {
-                    // it's an int with an exponent e.g. 10e50 (gj graphql)
-                    return self.rest_float_exponent(word);
-                }
-                Some(c) if char_terminates_number(c) => {
-                    self.lone_minus_check(word, is_neg)?;
-                    let int = self.slice(word);
-                    return Ok(TokenValue::IntLit(int));
-                }
-                None => {
-                    // we have encountered eof or a non-numeric and non-period char.
-                    // the number is an integer or invalid.
-                    // if the number was negative and the len is 1 then we
-                    // have a '-'; that's not a valid int.
-                    self.lone_minus_check(word, is_neg)?;
-
-                    // as long as the number is not '-' we have an integer.
-                    let int = self.slice(word);
-                    debug_assert!(int.parse::<i64>().is_ok(), "{:?}", int);
-                    return Ok(TokenValue::IntLit(int));
-                }
-                Some(_) => {
-                    self.lone_minus_check(word, is_neg)?;
-                    word = word.add(self.consume_while(char_is_human_word));
-                    return self.invalid(word, "invalid number");
-                }
-            }
+        word = word.add(self.consume_while(|c| c == '.' || c == 'e' || c == 'E'));
+        word = word.add(self.consume_while(|c| c == '-'));
+        word = word.add(self.consume_while(|c| c.is_numeric()));
+        word = word.add(self.consume_while(|c| c == 'e' || c == 'E'));
+        word = word.add(self.consume_while(|c| c == '-'));
+        word = word.add(self.consume_while(|c| c.is_numeric()));
+        let num = self.slice(word);
+        if num == "-" {
+            Ok(TokenValue::Unknown(num))
+        } else {
+            Ok(TokenValue::NumberLit(num))
         }
+
+        // loop {
+        //     match self.peek_char() {
+        //         Some('.') => {
+        //             // the number is a float! or invalid.
+        //             // consume the period and inc the len
+        //         }
+
+        //         Some('e' | 'E') => {
+        //             // it's an int with an exponent e.g. 10e50 (gj graphql)
+        //             return self.rest_float_exponent(word);
+        //         }
+        //         Some(c) if char_terminates_number(c) => {
+        //             self.lone_minus_check(word, is_neg)?;
+        //             let int = self.slice(word);
+        //             return Ok(TokenValue::NumberLit(int));
+        //         }
+        //         None => {
+        //             // we have encountered eof or a non-numeric and non-period char.
+        //             // the number is an integer or invalid.
+        //             // if the number was negative and the len is 1 then we
+        //             // have a '-'; that's not a valid int.
+        //             self.lone_minus_check(word, is_neg)?;
+
+        //             // as long as the number is not '-' we have an integer.
+        //             let int = self.slice(word);
+        //             debug_assert!(int.parse::<i64>().is_ok(), "{:?}", int);
+        //             return Ok(TokenValue::NumberLit(int));
+        //         }
+        //         Some(_) => {
+        //             self.lone_minus_check(word, is_neg)?;
+        //             word = word.add(self.consume_while(char_is_human_word));
+        //             return self.invalid(word, "invalid number");
+        //         }
+        //     }
+        // }
     }
 
     // best. function. ever.
@@ -593,77 +591,77 @@ impl<'a> Lexer<'a> {
         self.cell.consume_while(self.text, f)
     }
 
-    fn rest_float_mantissa(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
-        let mantissa_len = self.consume_while(|c| c.is_numeric());
-        if mantissa_len == 0 {
-            return self.invalid(word, "incomplete float - missing mantissa");
-        }
-        word = word.add(mantissa_len);
-        self.rest_float_exponent(word)
-    }
+    // fn rest_float_mantissa(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    //     let mantissa_len = self.consume_while(|c| c.is_numeric());
+    //     if mantissa_len == 0 {
+    //         return self.invalid(word, "incomplete float - missing mantissa");
+    //     }
+    //     word = word.add(mantissa_len);
+    //     self.rest_float_exponent(word)
+    // }
 
-    fn rest_float_exponent(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
-        match self.peek_char() {
-            Some('e' | 'E') => {
-                // it's scientific notation... as long as the next thing is 1 or more digits.
-                _ = self.next_char();
-                word = word.add(1);
-                // peek the next char to see if it's a '-' if so we have a negative exponent.
-                match self.peek_char() {
-                    Some('-') => {
-                        _ = self.next_char();
-                        word = word.add(1);
-                        true
-                    }
-                    _ => false,
-                };
-                let exponent_len = self.consume_while(|c| c.is_numeric());
-                if exponent_len == 0 {
-                    word = word.add(self.consume_while(char_is_human_word));
-                    return self.invalid(word, "invalid float exponent");
-                }
-                word = word.add(exponent_len);
-                match self.peek_char() {
-                    Some(c) if c.is_whitespace() => {
-                        // the character after the exponent is whitespace.
-                        // it's a well-formed float.
-                        let float = self.slice(word);
-                        debug_assert!(float.parse::<f64>().is_ok());
-                        return Ok(TokenValue::FloatLit(float));
-                    }
-                    None => {
-                        // the last character of the exponent is eof.
-                        // it's a well-formed float.
-                        let float = self.slice(word);
-                        debug_assert!(float.parse::<f64>().is_ok());
-                        return Ok(TokenValue::FloatLit(float));
-                    }
-                    Some(_) => {
-                        // the character after the exponent is not whitespace and not eof.
-                        // it's a messed up looking float-like thing.
-                        return self.invalid(word.add(1), "float exponent is invalid");
-                    }
-                }
-            }
-            Some(c) if char_terminates_number(c) => {
-                // the float was complete on the previous char.
-                let float = self.slice(word);
-                debug_assert!(float.parse::<f64>().is_ok());
-                return Ok(TokenValue::FloatLit(float));
-            }
-            Some(_) => {
-                // this float is touching other non-whitespace chars.
-                word = word.add(self.consume_while(char_is_human_word));
-                return self.invalid(word, "invalid float");
-            }
-            None => {
-                // the float is valid and is terminated by eof.
-                let float = self.slice(word);
-                debug_assert!(float.parse::<f64>().is_ok());
-                return Ok(TokenValue::FloatLit(float));
-            }
-        }
-    }
+    // fn rest_float_exponent(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    //     match self.peek_char() {
+    //         Some('e' | 'E') => {
+    //             // it's scientific notation... as long as the next thing is 1 or more digits.
+    //             _ = self.next_char();
+    //             word = word.add(1);
+    //             // peek the next char to see if it's a '-' if so we have a negative exponent.
+    //             match self.peek_char() {
+    //                 Some('-') => {
+    //                     _ = self.next_char();
+    //                     word = word.add(1);
+    //                     true
+    //                 }
+    //                 _ => false,
+    //             };
+    //             let exponent_len = self.consume_while(|c| c.is_numeric());
+    //             if exponent_len == 0 {
+    //                 word = word.add(self.consume_while(char_is_human_word));
+    //                 return self.invalid(word, "invalid float exponent");
+    //             }
+    //             word = word.add(exponent_len);
+    //             match self.peek_char() {
+    //                 Some(c) if c.is_whitespace() => {
+    //                     // the character after the exponent is whitespace.
+    //                     // it's a well-formed float.
+    //                     let float = self.slice(word);
+    //                     debug_assert!(float.parse::<f64>().is_ok());
+    //                     return Ok(TokenValue::NumberLit(float));
+    //                 }
+    //                 None => {
+    //                     // the last character of the exponent is eof.
+    //                     // it's a well-formed float.
+    //                     let float = self.slice(word);
+    //                     debug_assert!(float.parse::<f64>().is_ok());
+    //                     return Ok(TokenValue::NumberLit(float));
+    //                 }
+    //                 Some(_) => {
+    //                     // the character after the exponent is not whitespace and not eof.
+    //                     // it's a messed up looking float-like thing.
+    //                     return self.invalid(word.add(1), "float exponent is invalid");
+    //                 }
+    //             }
+    //         }
+    //         Some(c) if char_terminates_number(c) => {
+    //             // the float was complete on the previous char.
+    //             let float = self.slice(word);
+    //             debug_assert!(float.parse::<f64>().is_ok());
+    //             return Ok(TokenValue::NumberLit(float));
+    //         }
+    //         Some(_) => {
+    //             // this float is touching other non-whitespace chars.
+    //             word = word.add(self.consume_while(char_is_human_word));
+    //             return self.invalid(word, "invalid float");
+    //         }
+    //         None => {
+    //             // the float is valid and is terminated by eof.
+    //             let float = self.slice(word);
+    //             debug_assert!(float.parse::<f64>().is_ok());
+    //             return Ok(TokenValue::NumberLit(float));
+    //         }
+    //     }
+    // }
 
     fn rest_name(&self, mut word: Word) -> TokenValueStr<'a> {
         debug_assert!(word.len == 1);
@@ -941,46 +939,46 @@ mod tests {
     }
 
     #[test]
-    fn lexer_int_alone() {
-        test_alone!("123", IntLit("123"));
-        test_alone!("-123", IntLit("-123"));
+    fn lexer_number_int_alone() {
+        test_alone!("123", NumberLit("123"));
+        test_alone!("-123", NumberLit("-123"));
     }
 
     #[test]
     fn lexer_neg_int_alone() {
         let text = "-123";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(IntLit("-123"), pos(1, 1))));
+        assert_eq!(lexer.next(), Ok(tok(NumberLit("-123"), pos(1, 1))));
         assert_eq!(lexer.next(), eof());
     }
 
     #[test]
-    fn lexer_float_alone() {
-        test_alone!("1.23", FloatLit("1.23"));
-        test_alone!("-1.23", FloatLit("-1.23"));
+    fn lexer_number_float_alone() {
+        test_alone!("1.23", NumberLit("1.23"));
+        test_alone!("-1.23", NumberLit("-1.23"));
     }
 
     #[test]
     fn lexer_neg_float_alone() {
         let text = "-1.23";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(FloatLit("-1.23"), pos(1, 1))));
+        assert_eq!(lexer.next(), Ok(tok(NumberLit("-1.23"), pos(1, 1))));
         assert_eq!(lexer.next(), eof());
     }
 
     #[test]
     fn lexer_sci_float_alone() {
-        test_alone!("1.23e33", FloatLit("1.23e33"));
-        test_alone!("-1.23e33", FloatLit("-1.23e33"));
-        test_alone!("-1.23e-33", FloatLit("-1.23e-33"));
-        test_alone!("-1.23E-33", FloatLit("-1.23E-33"));
+        test_alone!("1.23e33", NumberLit("1.23e33"));
+        test_alone!("-1.23e33", NumberLit("-1.23e33"));
+        test_alone!("-1.23e-33", NumberLit("-1.23e-33"));
+        test_alone!("-1.23E-33", NumberLit("-1.23E-33"));
     }
 
     #[test]
     fn lexer_sci_int_alone() {
         // wtf graphql...
-        test_alone!("1e50", FloatLit("1e50"));
-        test_alone!("1E50", FloatLit("1E50"));
+        test_alone!("1e50", NumberLit("1e50"));
+        test_alone!("1E50", NumberLit("1E50"));
     }
 
     #[test]
@@ -1146,13 +1144,13 @@ mod tests {
         let text = "[1, 2, 3]";
         let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Ok(tok(OpenBracket, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(IntLit("1"), pos(1, 2))));
+        assert_eq!(lexer.next(), Ok(tok(NumberLit("1"), pos(1, 2))));
         assert_eq!(lexer.next(), Ok(tok(Comma, pos(1, 3))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 4))));
-        assert_eq!(lexer.next(), Ok(tok(IntLit("2"), pos(1, 5))));
+        assert_eq!(lexer.next(), Ok(tok(NumberLit("2"), pos(1, 5))));
         assert_eq!(lexer.next(), Ok(tok(Comma, pos(1, 6))));
         assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 7))));
-        assert_eq!(lexer.next(), Ok(tok(IntLit("3"), pos(1, 8))));
+        assert_eq!(lexer.next(), Ok(tok(NumberLit("3"), pos(1, 8))));
         assert_eq!(lexer.next(), Ok(tok(CloseBracket, pos(1, 9))));
         assert_eq!(lexer.next(), eof());
     }
