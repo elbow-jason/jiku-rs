@@ -1,9 +1,9 @@
-use crate::{DirectiveName, Value};
+use crate::{Argument, DirectiveName};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Directive<'a> {
     pub name: DirectiveName<'a>,
-    pub arguments: Vec<(&'a str, Value<'a>)>,
+    pub arguments: Vec<Argument<'a>>,
     pub location: Option<DirectiveLocation>,
 }
 

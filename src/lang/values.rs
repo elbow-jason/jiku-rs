@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{EnumValueName, FieldName, Pos, VariableName};
-use ord_float::Float64;
+pub use ord_float::Float64;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ValuePos<'a> {
@@ -37,6 +37,12 @@ pub enum Value<'a> {
     Object(Map<'a>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Argument<'a> {
+    pub name: FieldName<'a>,
+    pub value: Value<'a>,
+}
+
 // TODO: do we need a big-int for Int?
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Int(pub(crate) i64);
@@ -48,6 +54,12 @@ impl Int {
 
 impl From<i32> for Int {
     fn from(i: i32) -> Self {
+        Int(i as i64)
+    }
+}
+
+impl From<i64> for Int {
+    fn from(i: i64) -> Self {
         Int(i as i64)
     }
 }

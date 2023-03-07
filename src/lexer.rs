@@ -103,10 +103,10 @@ pub enum TokenValue<T: AsRef<str>> {
     Pipe,
 }
 
-impl From<TokenValue<&str>> for TokenValue<String> {
-    fn from(v: TokenValue<&str>) -> TokenValue<String> {
+impl<'a> TokenValue<&'a str> {
+    pub fn to_owned(self) -> TokenValue<String> {
         use TokenValue::*;
-        match v {
+        match self {
             StringLit(s) => StringLit(s.to_string()),
             BlockStringLit(s) => BlockStringLit(s.to_string()),
             Name(s) => Name(s.to_string()),
@@ -137,9 +137,7 @@ impl From<TokenValue<&str>> for TokenValue<String> {
             UnicodeBom => UnicodeBom,
         }
     }
-}
 
-impl<'a> TokenValue<&'a str> {
     pub fn as_str(&'a self) -> &'a str {
         use TokenValue::*;
         match self {

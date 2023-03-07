@@ -16,13 +16,22 @@ macro_rules! impl_name_from_token {
 
 impl_name_from_token!(TypeName);
 impl_name_from_token!(EnumValueName);
-impl_name_from_token!(DirectiveName);
 impl_name_from_token!(VariableName);
 impl_name_from_token!(FieldName);
 impl_name_from_token!(InterfaceName);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DirectiveName<'a>(pub &'a str);
+
+impl<'a> From<Token<'a>> for DirectiveName<'a> {
+    fn from(token: Token<'a>) -> Self {
+        let val = match token.val {
+            TokenValue::DirectiveName(name) => name,
+            _ => unreachable!(),
+        };
+        DirectiveName(val)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeName<'a>(pub &'a str);
