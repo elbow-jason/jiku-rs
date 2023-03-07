@@ -83,16 +83,11 @@ type Res<T> = std::result::Result<T, Error>;
 struct SchemaParser<'a> {
     lexer: Lexer<'a>,
     config: ParserConfig,
-    // definitions: Vec<DefinitionDefinition<'a>>,
 }
 
 impl<'a> SchemaParser<'a> {
     fn new(lexer: Lexer<'a>, config: ParserConfig) -> SchemaParser<'a> {
-        SchemaParser {
-            lexer,
-            config,
-            // definitions: Vec::new(),
-        }
+        SchemaParser { lexer, config }
     }
 
     fn next(&self) -> Res<Token<'a>> {
