@@ -929,7 +929,10 @@ mod tests {
 
     #[test]
     fn parses_union_type() {
-        let text = "union Thing = Other";
+        let text = r#"
+        "some desc"
+        union Thing = Other
+        "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
         if let SchemaTopLevel::TypeDef(TypeDef::Union(UnionType {
@@ -940,8 +943,8 @@ mod tests {
             types,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(1, 1));
-            assert_eq!(*description, None);
+            assert_eq!(*pos, p(2, 9));
+            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
             assert_eq!(types.len(), 1);
