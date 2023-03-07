@@ -846,6 +846,44 @@ mod tests {
     }
 
     #[test]
+    fn errors_for_invalid_object_field() {
+        let text = r#"
+        "some desc"
+        type Thing { 12345: String }
+        "#;
+        let res = parse_schema(text);
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert_eq!(
+            err,
+            SchemaParserError::SyntaxError {
+                value: TokenValue::NumberLit("12345".to_string()),
+                pos: p(2, 22),
+                message: "invalid field definition"
+            }
+        );
+    }
+
+    #[test]
+    fn errors_for_invalid_directive_field_name() {
+        let text = r#"
+        "some desc"
+        type Thing @myDir(123: "123") { name: String }
+        "#;
+        let res = parse_schema(text);
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert_eq!(
+            err,
+            SchemaParserError::SyntaxError {
+                value: TokenValue::NumberLit("123".to_string()),
+                pos: p(2, 27),
+                message: "expected argument name"
+            }
+        );
+    }
+
+    #[test]
     fn parses_enum_type() {
         let text = r#"
         "some desc"
