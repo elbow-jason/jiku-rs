@@ -5,7 +5,6 @@
 //! The
 
 use std::cell::Cell;
-use thiserror::Error as ThisError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct Pos {
@@ -100,8 +99,23 @@ pub enum TokenValue<T: AsRef<str>> {
     // |
     Pipe,
 
-    Unknown(T),
+    Unknown(T, Guess),
     NumberLit(T),
+    UnclosedStringLit(T),
+    UnclosedBlockStringLit(T),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Guess {
+    Thing,
+    InvalidDirectiveName,
+    InvalidCharacter,
+    ExpectedThreeDots,
+    InvalidFragment,
+    InvalidVariableName,
+    InvalidNumber,
+    UnclosedString,
+    UnclosedBlockString,
 }
 
 impl<'a> TokenValue<&'a str> {
@@ -109,6 +123,8 @@ impl<'a> TokenValue<&'a str> {
         use TokenValue::*;
         match self {
             StringLit(s) => StringLit(s.to_string()),
+            UnclosedStringLit(s) => UnclosedStringLit(s.to_string()),
+            UnclosedBlockStringLit(s) => UnclosedBlockStringLit(s.to_string()),
             BlockStringLit(s) => BlockStringLit(s.to_string()),
             Name(s) => Name(s.to_string()),
             NumberLit(s) => NumberLit(s.to_string()),
@@ -116,7 +132,7 @@ impl<'a> TokenValue<&'a str> {
             Fragment(s) => Fragment(s.to_string()),
             VariableName(s) => VariableName(s.to_string()),
             Comment(s) => Comment(s.to_string()),
-            Unknown(s) => Unknown(s.to_string()),
+            Unknown(s, msg) => Unknown(s.to_string(), msg),
             // never ever ever do x => x.into()
             OpenParen => OpenParen,
             CloseParen => CloseParen,
@@ -142,8 +158,17 @@ impl<'a> TokenValue<&'a str> {
     pub fn as_str(&'a self) -> &'a str {
         use TokenValue::*;
         match self {
-            StringLit(s) | BlockStringLit(s) | Name(s) | DirectiveName(s) | Fragment(s)
-            | VariableName(s) | Comment(s) | Unknown(s) | NumberLit(s) => s,
+            StringLit(s)
+            | BlockStringLit(s)
+            | Name(s)
+            | DirectiveName(s)
+            | Fragment(s)
+            | VariableName(s)
+            | Comment(s)
+            | Unknown(s, _)
+            | NumberLit(s)
+            | UnclosedBlockStringLit(s)
+            | UnclosedStringLit(s) => s,
             // never ever ever do x => x.into()
             OpenParen => "(",
             CloseParen => ")",
@@ -171,8 +196,17 @@ impl TokenValue<String> {
     pub fn as_str<'a>(&'a self) -> &'a str {
         use TokenValue::*;
         match self {
-            StringLit(s) | BlockStringLit(s) | Name(s) | DirectiveName(s) | Fragment(s)
-            | VariableName(s) | Comment(s) | Unknown(s) | NumberLit(s) => s,
+            StringLit(s)
+            | BlockStringLit(s)
+            | Name(s)
+            | DirectiveName(s)
+            | Fragment(s)
+            | VariableName(s)
+            | Comment(s)
+            | Unknown(s, _)
+            | NumberLit(s)
+            | UnclosedBlockStringLit(s)
+            | UnclosedStringLit(s) => s,
             // never ever ever do x => x.into()
             OpenParen => "(",
             CloseParen => ")",
@@ -213,54 +247,6 @@ impl<'a> Token<'a> {
         self.val.as_str()
     }
 }
-
-#[derive(ThisError, Debug, Clone, PartialEq, Eq)]
-pub enum LexerError {
-    #[error("eof - no more tokens")]
-    EOF,
-    #[error("invalid token {word:?} at {pos:?} due to {message}")]
-    InvalidToken {
-        word: String,
-        pos: Pos,
-        message: &'static str,
-    },
-}
-
-// #[derive(Clone)]
-// pub struct LexerIter<'a> {
-//     done: bool,
-//     lexer: Lexer<'a>,
-// }
-
-// impl<'a> LexerIter<'a> {
-//     pub fn new(text: &'a str) -> LexerIter<'a> {
-//         LexerIter {
-//             done: false,
-//             lexer: Lexer::new(text),
-//         }
-//     }
-// }
-
-// impl<'a> Iterator for LexerIter<'a> {
-//     type Item = Result<Token<'a>, LexerError>;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.done {
-//             return None;
-//         }
-//         match self.lexer.next() {
-//             Ok(tok) => Some(Ok(tok)),
-//             // it's done without err
-//             Err(e) => {
-//                 self.done = true;
-//                 match &e {
-//                     LexerError::EOF => None,
-//                     _ => Some(Err(e)),
-//                 }
-//             }
-//         }
-//     }
-// }
 
 #[derive(Debug, Clone, Copy)]
 struct Word {
@@ -375,7 +361,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn peek(&self) -> Result<Token<'a>, LexerError> {
+    pub fn peek(&self) -> Option<Token<'a>> {
         // capture the state.
         // get the next.
         // overwrite the state after next with the original state.
@@ -385,26 +371,23 @@ impl<'a> Lexer<'a> {
         peeked
     }
 
-    pub fn peek_fill(&self, container: &mut [Option<Token<'a>>]) {
-        let state = self.cell.state.get();
-        for slot in container.iter_mut() {
-            match self.next() {
-                Ok(token) => *slot = Some(token),
-                Err(_) => break,
-            }
-        }
-        _ = self.cell.state.swap(&Cell::new(state));
-    }
+    // pub fn peek_fill(&self, container: &mut [Option<Token<'a>>]) {
+    //     let state = self.cell.state.get();
+    //     for slot in container.iter_mut() {
+    //         match self.next() {
+    //             Ok(token) => *slot = Some(token),
+    //             Err(_) => break,
+    //         }
+    //     }
+    //     _ = self.cell.state.swap(&Cell::new(state));
+    // }
 
-    pub fn next_if<F: Fn(&Result<Token<'a>, LexerError>) -> bool>(
-        &self,
-        f: F,
-    ) -> Option<Result<Token<'a>, LexerError>> {
+    pub fn next_if<F: Fn(&Option<Token<'a>>) -> bool>(&self, f: F) -> Option<Token<'a>> {
         let state = self.cell.state.get();
         let next = self.next();
         if f(&next) {
             // if the next is good we leave the state as updated.
-            Some(next)
+            next
         } else {
             // if the next was not good we reset the state
             self.cell.state.swap(&Cell::new(state));
@@ -412,7 +395,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next(&self) -> Result<Token<'a>, LexerError> {
+    pub fn next(&self) -> Option<Token<'a>> {
         // capture the pos and offset before we call next_char -
         // next_char updates the pos and offset and we want the
         // original position and offset of the word.
@@ -448,18 +431,18 @@ impl<'a> Lexer<'a> {
             '&' => Ampersand,
             '!' => Bang,
             '|' => Pipe,
-            '.' => self.rest_three_dots(word)?,
-            '$' => self.rest_variable_name(word)?,
-            '@' => self.rest_directive_name(word)?,
-            '"' => self.rest_string_or_block_string(word)?,
+            '.' => self.rest_three_dots(word),
+            '$' => self.rest_variable_name(word),
+            '@' => self.rest_directive_name(word),
+            '"' => self.rest_string_or_block_string(word),
             '#' => self.rest_comment(word),
-            '-' => self.next_number(word)?,
-            i if i.is_numeric() => self.next_number(word)?,
+            '-' => self.next_number(word),
+            i if i.is_numeric() => self.next_number(word),
             s if char_starts_name(s) => self.rest_name(word),
-            _ => return self.invalid(word, "encountered invalid character"),
+            _ => self.invalid(word, Guess::InvalidCharacter),
         };
 
-        Ok(Token::new(val, pos))
+        Some(Token::new(val, pos))
     }
 
     fn slice(&self, word: Word) -> &'a str {
@@ -470,70 +453,65 @@ impl<'a> Lexer<'a> {
         self.cell.peek(self.text)
     }
 
-    fn next_char(&self) -> Result<char, LexerError> {
-        self.cell.next_char(self.text).ok_or(LexerError::EOF)
+    fn next_char(&self) -> Option<char> {
+        self.cell.next_char(self.text)
     }
 
-    fn rest_three_dots(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_three_dots(&self, mut word: Word) -> TokenValueStr<'a> {
         word = word.add(self.consume_while(|c| c == '.'));
         if word.len != 3 {
             word = word.add(self.consume_while(char_is_human_word));
-            return self.invalid(word, "expected exactly 3 dots");
+            return self.invalid(word, Guess::ExpectedThreeDots);
         }
         match self.peek_char() {
             Some(c) if char_starts_name(c) => {
-                let frag = self.full_name_str(word, "invalid fragment")?;
-                Ok(TokenValue::Fragment(frag))
+                match self.full_name_word(word, Guess::InvalidFragment) {
+                    Err(tv) => tv,
+                    Ok(word) => TokenValue::Fragment(self.slice(word)),
+                }
             }
             Some(_) | None => {
                 debug_assert!(self.slice(word) == "...");
-                Ok(TokenValue::ThreeDots)
+                TokenValue::ThreeDots
             }
         }
     }
 
-    fn rest_variable_name(&self, word: Word) -> Result<TokenValueStr<'a>, LexerError> {
-        let var_name = self.full_name_str(word, "invalid variable name")?;
-        Ok(TokenValue::VariableName(var_name))
+    fn rest_variable_name(&self, word: Word) -> TokenValueStr<'a> {
+        match self.full_name_word(word, Guess::InvalidVariableName) {
+            Err(tv) => tv,
+            Ok(word) => TokenValue::VariableName(self.slice(word)),
+        }
     }
 
-    fn rest_directive_name(&self, word: Word) -> Result<TokenValueStr<'a>, LexerError> {
-        let dir_name = self.full_name_str(word, "invalid directive name")?;
-        Ok(TokenValue::DirectiveName(dir_name))
+    fn rest_directive_name(&self, word: Word) -> TokenValueStr<'a> {
+        match self.full_name_word(word, Guess::InvalidDirectiveName) {
+            Ok(word) => TokenValue::DirectiveName(self.slice(word)),
+            Err(tv) => tv,
+        }
     }
 
-    fn invalid<T>(&self, word: Word, message: &'static str) -> Result<T, LexerError> {
-        Err(LexerError::InvalidToken {
-            word: self.slice(word).into(),
-            pos: word.pos,
-            message,
-        })
+    fn invalid(&self, word: Word, guess: Guess) -> TokenValueStr<'a> {
+        TokenValue::Unknown(self.slice(word), guess)
     }
 
-    fn full_name_str(&self, mut word: Word, message: &'static str) -> Result<&'a str, LexerError> {
+    fn full_name_word(&self, mut word: Word, guess: Guess) -> Result<Word, TokenValueStr<'a>> {
         match self.peek_char() {
             Some(c) if char_starts_name(c) => {
                 // it's a name!
                 _ = self.next_char();
                 word = word.add(1);
             }
-            Some(_) => {
-                // it's not a name...
-                word.len += self.consume_while(char_is_human_word);
-                return self.invalid(word, message);
-            }
-            None => {
-                // it was an empty name?
-                debug_assert!(word.len == 0);
-                return self.invalid(word, message);
+            _ => {
+                word = word.add(self.consume_while(char_is_human_word));
+                return Err(self.invalid(word, guess));
             }
         }
         word = word.add(self.consume_while(char_continues_name));
-        let name = self.slice(word);
-        Ok(name)
+        Ok(word)
     }
 
-    fn next_number(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn next_number(&self, mut word: Word) -> TokenValueStr<'a> {
         debug_assert!(word.len == 1);
         word = word.add(self.consume_while(|c| {
             c.is_alphanumeric()
@@ -544,124 +522,16 @@ impl<'a> Lexer<'a> {
         }));
         let num = self.slice(word);
         if num == "-" {
-            Ok(TokenValue::Unknown(num))
+            TokenValue::Unknown(num, Guess::InvalidNumber)
         } else {
-            Ok(TokenValue::NumberLit(num))
+            TokenValue::NumberLit(num)
         }
-
-        // loop {
-        //     match self.peek_char() {
-        //         Some('.') => {
-        //             // the number is a float! or invalid.
-        //             // consume the period and inc the len
-        //         }
-
-        //         Some('e' | 'E') => {
-        //             // it's an int with an exponent e.g. 10e50 (gj graphql)
-        //             return self.rest_float_exponent(word);
-        //         }
-        //         Some(c) if char_terminates_number(c) => {
-        //             self.lone_minus_check(word, is_neg)?;
-        //             let int = self.slice(word);
-        //             return Ok(TokenValue::NumberLit(int));
-        //         }
-        //         None => {
-        //             // we have encountered eof or a non-numeric and non-period char.
-        //             // the number is an integer or invalid.
-        //             // if the number was negative and the len is 1 then we
-        //             // have a '-'; that's not a valid int.
-        //             self.lone_minus_check(word, is_neg)?;
-
-        //             // as long as the number is not '-' we have an integer.
-        //             let int = self.slice(word);
-        //             debug_assert!(int.parse::<i64>().is_ok(), "{:?}", int);
-        //             return Ok(TokenValue::NumberLit(int));
-        //         }
-        //         Some(_) => {
-        //             self.lone_minus_check(word, is_neg)?;
-        //             word = word.add(self.consume_while(char_is_human_word));
-        //             return self.invalid(word, "invalid number");
-        //         }
-        //     }
-        // }
     }
 
     // best. function. ever.
     fn consume_while<F: Fn(char) -> bool>(&self, f: F) -> usize {
         self.cell.consume_while(self.text, f)
     }
-
-    // fn rest_float_mantissa(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
-    //     let mantissa_len = self.consume_while(|c| c.is_numeric());
-    //     if mantissa_len == 0 {
-    //         return self.invalid(word, "incomplete float - missing mantissa");
-    //     }
-    //     word = word.add(mantissa_len);
-    //     self.rest_float_exponent(word)
-    // }
-
-    // fn rest_float_exponent(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
-    //     match self.peek_char() {
-    //         Some('e' | 'E') => {
-    //             // it's scientific notation... as long as the next thing is 1 or more digits.
-    //             _ = self.next_char();
-    //             word = word.add(1);
-    //             // peek the next char to see if it's a '-' if so we have a negative exponent.
-    //             match self.peek_char() {
-    //                 Some('-') => {
-    //                     _ = self.next_char();
-    //                     word = word.add(1);
-    //                     true
-    //                 }
-    //                 _ => false,
-    //             };
-    //             let exponent_len = self.consume_while(|c| c.is_numeric());
-    //             if exponent_len == 0 {
-    //                 word = word.add(self.consume_while(char_is_human_word));
-    //                 return self.invalid(word, "invalid float exponent");
-    //             }
-    //             word = word.add(exponent_len);
-    //             match self.peek_char() {
-    //                 Some(c) if c.is_whitespace() => {
-    //                     // the character after the exponent is whitespace.
-    //                     // it's a well-formed float.
-    //                     let float = self.slice(word);
-    //                     debug_assert!(float.parse::<f64>().is_ok());
-    //                     return Ok(TokenValue::NumberLit(float));
-    //                 }
-    //                 None => {
-    //                     // the last character of the exponent is eof.
-    //                     // it's a well-formed float.
-    //                     let float = self.slice(word);
-    //                     debug_assert!(float.parse::<f64>().is_ok());
-    //                     return Ok(TokenValue::NumberLit(float));
-    //                 }
-    //                 Some(_) => {
-    //                     // the character after the exponent is not whitespace and not eof.
-    //                     // it's a messed up looking float-like thing.
-    //                     return self.invalid(word.add(1), "float exponent is invalid");
-    //                 }
-    //             }
-    //         }
-    //         Some(c) if char_terminates_number(c) => {
-    //             // the float was complete on the previous char.
-    //             let float = self.slice(word);
-    //             debug_assert!(float.parse::<f64>().is_ok());
-    //             return Ok(TokenValue::NumberLit(float));
-    //         }
-    //         Some(_) => {
-    //             // this float is touching other non-whitespace chars.
-    //             word = word.add(self.consume_while(char_is_human_word));
-    //             return self.invalid(word, "invalid float");
-    //         }
-    //         None => {
-    //             // the float is valid and is terminated by eof.
-    //             let float = self.slice(word);
-    //             debug_assert!(float.parse::<f64>().is_ok());
-    //             return Ok(TokenValue::NumberLit(float));
-    //         }
-    //     }
-    // }
 
     fn rest_name(&self, mut word: Word) -> TokenValueStr<'a> {
         debug_assert!(word.len == 1);
@@ -678,12 +548,12 @@ impl<'a> Lexer<'a> {
         return TokenValue::Comment(comment);
     }
 
-    fn rest_string_or_block_string(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn rest_string_or_block_string(&self, mut word: Word) -> TokenValueStr<'a> {
         match self.peek_char() {
             None => {
                 // this freshly opened string's double-quote was at eof and not complete.
                 // e.g. the text looks like this: `"hi \""` - there is a double-quote at eof.
-                return self.invalid(word, "unclosed string");
+                return self.invalid(word, Guess::UnclosedString);
             }
             Some('"') => {
                 // this is either an empty string or the beginning of a block quote or invalid.
@@ -705,7 +575,7 @@ impl<'a> Lexer<'a> {
                         // it was an empty string!
                         debug_assert!(word.len == 2);
                         debug_assert!(self.slice(word) == "\"\"");
-                        Ok(TokenValue::StringLit("\"\""))
+                        TokenValue::StringLit("\"\"")
                     }
                 }
             }
@@ -717,22 +587,21 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn next_finish_string(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn next_finish_string(&self, mut word: Word) -> TokenValueStr<'a> {
         debug_assert!(word.len == 1);
         loop {
             match self.next_char() {
-                Err(LexerError::InvalidToken { .. }) => unreachable!(),
-                Err(LexerError::EOF) => {
+                None => {
                     // this string did not close before eof.
-                    return self.invalid(word, "unclosed string");
+                    return self.invalid(word, Guess::UnclosedString);
                 }
-                Ok('"') => {
+                Some('"') => {
                     // the string just closed.
                     word = word.add(1);
                     let string = self.slice(word);
-                    return Ok(TokenValue::StringLit(string));
+                    return TokenValue::StringLit(string);
                 }
-                Ok(c) => {
+                Some(c) => {
                     // c is yet another char in the content of the string.
                     // increase the len and continue the loop.
                     word = word.add(c.len_utf8());
@@ -742,37 +611,36 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn next_finish_block_string(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
+    fn next_finish_block_string(&self, mut word: Word) -> TokenValueStr<'a> {
         debug_assert!(word.len == 3);
 
         let mut dq_run = 0;
         loop {
             // looking for 3 consecutive quotues
             match self.next_char() {
-                Err(LexerError::InvalidToken { .. }) => unreachable!(),
-                Err(LexerError::EOF) => {
-                    // we encountered eof before the block string closed.
-                    return self.invalid(word, "unclosed block string");
-                }
-                Ok('\\') => {
+                Some('\\') => {
                     // skip the next char (this means that `\"""` results in skip-dq-dq and does not
                     // close the block string.
                     dq_run = 0;
                     _ = self.next_char();
                     word = word.add(1);
                 }
-                Ok('"') => {
+                Some('"') => {
                     dq_run += 1;
                     word = word.add(1);
                     if dq_run == 3 {
                         // the block string just closed.
                         let block_string = self.slice(word);
-                        return Ok(TokenValue::BlockStringLit(block_string));
+                        return TokenValue::BlockStringLit(block_string);
                     }
                 }
-                Ok(c) => {
+                Some(c) => {
                     word = word.add(c.len_utf8());
                     dq_run = 0;
+                }
+                None => {
+                    // we encountered eof before the block string closed.
+                    return self.invalid(word, Guess::UnclosedBlockString);
                 }
             }
         }
@@ -792,15 +660,11 @@ mod tests {
         Token::new(val, pos)
     }
 
-    fn eof<'a>() -> Result<Token<'a>, LexerError> {
-        Err(LexerError::EOF)
-    }
-
     macro_rules! test_alone {
         ($text:expr, $val:expr) => {{
             let lexer = Lexer::new($text);
-            assert_eq!(lexer.next(), Ok(tok($val, pos(1, 1))));
-            assert_eq!(lexer.next(), eof());
+            assert_eq!(lexer.next(), Some(tok($val, pos(1, 1))));
+            assert_eq!(lexer.next(), None);
             ();
         }};
     }
@@ -839,11 +703,11 @@ mod tests {
     fn lexer_cr_does_not_change_pos() {
         let text = "\r\r  ";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(CarriageReturn, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(CarriageReturn, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 2))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(CarriageReturn, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(CarriageReturn, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 2))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
@@ -860,11 +724,11 @@ mod tests {
     fn lexer_unicode_bom_does_not_change_pos() {
         let text = "\u{FEFF}\u{FEFF}  ";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(UnicodeBom, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(UnicodeBom, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 2))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(UnicodeBom, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(UnicodeBom, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 2))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
@@ -881,61 +745,61 @@ mod tests {
     fn lexer_no_tokens() {
         let text = "";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn lexer_empty_string_literal() {
         let text = "a\"\"b";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(Name("a"), pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(StringLit("\"\""), pos(1, 2))));
-        assert_eq!(lexer.next(), Ok(tok(Name("b"), pos(1, 4))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(Name("a"), pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(StringLit("\"\""), pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("b"), pos(1, 4))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn lexer_comment_at_eof() {
         let text = "hi # yea";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(Name("hi"), pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 3))));
-        assert_eq!(lexer.next(), Ok(tok(Comment("# yea"), pos(1, 4))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(Name("hi"), pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Comment("# yea"), pos(1, 4))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn lexer_comment_followed_by_newline() {
         let text = "hi # yea\nok";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(Name("hi"), pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 3))));
-        assert_eq!(lexer.next(), Ok(tok(Comment("# yea"), pos(1, 4))));
-        assert_eq!(lexer.next(), Ok(tok(Newline, pos(1, 9))));
-        assert_eq!(lexer.next(), Ok(tok(Name("ok"), pos(2, 1))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(Name("hi"), pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Comment("# yea"), pos(1, 4))));
+        assert_eq!(lexer.next(), Some(tok(Newline, pos(1, 9))));
+        assert_eq!(lexer.next(), Some(tok(Name("ok"), pos(2, 1))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn lexer_multiple_spaces() {
         let text = "   ";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 2))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 3))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 3))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn lexer_multiple_names() {
         let text = "a b c";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(Name("a"), pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 2))));
-        assert_eq!(lexer.next(), Ok(tok(Name("b"), pos(1, 3))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 4))));
-        assert_eq!(lexer.next(), Ok(tok(Name("c"), pos(1, 5))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(Name("a"), pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("b"), pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 4))));
+        assert_eq!(lexer.next(), Some(tok(Name("c"), pos(1, 5))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
@@ -948,8 +812,8 @@ mod tests {
     fn lexer_neg_int_alone() {
         let text = "-123";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(NumberLit("-123"), pos(1, 1))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(NumberLit("-123"), pos(1, 1))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
@@ -1043,10 +907,10 @@ mod tests {
     fn lexer_empty_schema() {
         let text = "schema{}";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(Name("schema"), pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(OpenCurly, pos(1, 7))));
-        assert_eq!(lexer.next(), Ok(tok(CloseCurly, pos(1, 8))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(Name("schema"), pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(OpenCurly, pos(1, 7))));
+        assert_eq!(lexer.next(), Some(tok(CloseCurly, pos(1, 8))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
@@ -1059,45 +923,45 @@ mod tests {
 }";
         let lexer = Lexer::new(text.trim());
         // line 1 - {
-        assert_eq!(lexer.next(), Ok(tok(OpenCurly, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Newline, pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(OpenCurly, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Newline, pos(1, 2))));
         // line 2 - name
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(2, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(2, 2))));
-        assert_eq!(lexer.next(), Ok(tok(Name("name"), pos(2, 3))));
-        assert_eq!(lexer.next(), Ok(tok(Newline, pos(2, 7))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(2, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(2, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("name"), pos(2, 3))));
+        assert_eq!(lexer.next(), Some(tok(Newline, pos(2, 7))));
 
         // line 3 - age
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(3, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(3, 2))));
-        assert_eq!(lexer.next(), Ok(tok(Name("age"), pos(3, 3))));
-        assert_eq!(lexer.next(), Ok(tok(Newline, pos(3, 6))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(3, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(3, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("age"), pos(3, 3))));
+        assert_eq!(lexer.next(), Some(tok(Newline, pos(3, 6))));
 
         // line 4 - picture
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(4, 1))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(4, 2))));
-        assert_eq!(lexer.next(), Ok(tok(Name("picture"), pos(4, 3))));
-        assert_eq!(lexer.next(), Ok(tok(Newline, pos(4, 10))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(4, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(4, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("picture"), pos(4, 3))));
+        assert_eq!(lexer.next(), Some(tok(Newline, pos(4, 10))));
 
         // line 5 - }
-        assert_eq!(lexer.next(), Ok(tok(CloseCurly, pos(5, 1))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(CloseCurly, pos(5, 1))));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn lexer_list_of_int_lits() {
         let text = "[1, 2, 3]";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(OpenBracket, pos(1, 1))));
-        assert_eq!(lexer.next(), Ok(tok(NumberLit("1"), pos(1, 2))));
-        assert_eq!(lexer.next(), Ok(tok(Comma, pos(1, 3))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 4))));
-        assert_eq!(lexer.next(), Ok(tok(NumberLit("2"), pos(1, 5))));
-        assert_eq!(lexer.next(), Ok(tok(Comma, pos(1, 6))));
-        assert_eq!(lexer.next(), Ok(tok(Space, pos(1, 7))));
-        assert_eq!(lexer.next(), Ok(tok(NumberLit("3"), pos(1, 8))));
-        assert_eq!(lexer.next(), Ok(tok(CloseBracket, pos(1, 9))));
-        assert_eq!(lexer.next(), eof());
+        assert_eq!(lexer.next(), Some(tok(OpenBracket, pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(NumberLit("1"), pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(Comma, pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 4))));
+        assert_eq!(lexer.next(), Some(tok(NumberLit("2"), pos(1, 5))));
+        assert_eq!(lexer.next(), Some(tok(Comma, pos(1, 6))));
+        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 7))));
+        assert_eq!(lexer.next(), Some(tok(NumberLit("3"), pos(1, 8))));
+        assert_eq!(lexer.next(), Some(tok(CloseBracket, pos(1, 9))));
+        assert_eq!(lexer.next(), None);
     }
 
     use std::fs;
@@ -1115,11 +979,17 @@ mod tests {
             let it = Lexer::new(&data[..]);
             loop {
                 match it.next() {
-                    Ok(_) => continue,
-                    Err(LexerError::EOF) => break,
-                    Err(e) => {
-                        panic!("lexer failed on fixture {:?}: {:?}", path, e);
+                    None => break,
+                    Some(Token {
+                        val: TokenValue::Unknown(s, g),
+                        pos,
+                    }) => {
+                        panic!(
+                            "lexer failed on fixture {:?}: {:?} {:?} {:?}",
+                            path, s, g, pos
+                        );
                     }
+                    Some(_) => continue,
                 }
             }
         }

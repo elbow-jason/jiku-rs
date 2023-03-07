@@ -4,8 +4,8 @@
 use crate::{
     optional, required, Argument, DefaultValue, Definition, Description, Directive, DirectiveName,
     EnumType, EnumValue, EnumValueName, FieldDef, FieldName, Float64, InputObjectType,
-    InputValueDef, InterfaceType, Lexer, LexerError, ObjectType, Pos, ScalarType, SchemaDef,
-    SchemaDoc, Token, TokenValue, Type, TypeDef, TypeName, UnionType, Value,
+    InputValueDef, InterfaceType, Lexer, ObjectType, Pos, ScalarType, SchemaDef, SchemaDoc, Token,
+    TokenValue, Type, TypeDef, TypeName, UnionType, Value,
 };
 
 use super::traits::{Parser, ParserError};
@@ -54,9 +54,6 @@ pub enum SchemaParserError {
         message: &'static str,
     },
 
-    #[error("schema lexer error: {_0:?}")]
-    LexerError(LexerError),
-
     #[error("token already exists: {value:?} {pos:?}: {message:?}")]
     AlreadyExists {
         value: TokenValue<String>,
@@ -79,6 +76,9 @@ pub enum SchemaParserError {
 
     #[error("variables are not allowed in schema docs: {value:?} {pos:?}")]
     VariablesNotAllowed { value: TokenValue<String>, pos: Pos },
+
+    #[error("parser reached eof")]
+    EOF,
 }
 
 impl ParserError for SchemaParserError {
@@ -113,7 +113,7 @@ impl ParserError for SchemaParserError {
     }
 
     fn is_eof(&self) -> bool {
-        self == &SchemaParserError::LexerError(LexerError::EOF)
+        self == &SchemaParserError::EOF
     }
 }
 
@@ -138,7 +138,7 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
 
     fn next(&self) -> Res<Token<'a>> {
         loop {
-            let token = self.lexer.next().map_err(SchemaParserError::LexerError)?;
+            let token = self.lexer.next().ok_or(SchemaParserError::EOF)?;
             use TokenValue::*;
 
             match token.val {
@@ -150,7 +150,7 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
 
     fn peek(&self) -> Res<Token<'a>> {
         loop {
-            let token = self.lexer.peek().map_err(SchemaParserError::LexerError)?;
+            let token = self.lexer.peek().ok_or(SchemaParserError::EOF)?;
             use TokenValue::*;
 
             match token.val {
@@ -205,7 +205,7 @@ fn parse_top_level<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()>
         let res = _parse_top_level_once(p, doc);
         match res {
             Ok(()) => continue,
-            Err(SchemaParserError::LexerError(LexerError::EOF)) => return Ok(()),
+            Err(SchemaParserError::EOF) => return Ok(()),
             Err(err) => return Err(err),
         }
     }

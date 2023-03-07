@@ -3,7 +3,7 @@
 
 // turns source text into an iterator of lexed tokens.
 mod lexer;
-pub use lexer::{Lexer, LexerError, Pos, Token, TokenValue};
+pub use lexer::{Lexer, Pos, Token, TokenValue};
 
 // The runtime ast representation of graphql source code entities. There are
 // many data structures, but not many functions. The parser, sourcer, and

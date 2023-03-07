@@ -23,8 +23,8 @@ pub trait Parser<'a> {
         Self::Error::float(tok)
     }
 
-    fn is_eof_err(&self, err: &Self::Error) -> bool {
-        Self::Error::is_eof(err)
+    fn is_eof_err<'e>(&self, err: &Self::Error) -> bool {
+        err.is_eof()
     }
 }
 
