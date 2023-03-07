@@ -5,7 +5,7 @@ use crate::{
     DefaultValue, Directive, DirectiveName, EnumType, EnumValue, EnumValueName, FieldDef,
     FieldName, InputObjectType, InputValueDef, InterfaceType, Lexer, LexerError, ObjectType, Pos,
     ScalarType, SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue, Type, TypeDef, TypeName,
-    Value,
+    UnionType, Value,
 };
 
 use thiserror::Error as ThisError;
@@ -176,6 +176,7 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
                 Name("scalar") => parse_scalar_type(p, doc),
                 Name("enum") => parse_enum_type(p, doc),
                 Name("interface") => parse_interface_type(p, doc),
+                Name("union") => parse_union_type(p, doc),
                 _ => {
                     let message = "not a top-level schema identifier";
                     return Err(SchemaParserError::syntax(tok, message));
@@ -202,9 +203,9 @@ macro_rules! optional {
     ($p:expr, $val:pat) => {{
         use TokenValue::*;
         match $p.peek() {
-            ok_tok @ Ok(Token { val: $val, .. }) => {
+            Ok(tok @ Token { val: $val, .. }) => {
                 _ = $p.next();
-                Ok(Some(ok_tok))
+                Ok(Some(tok))
             }
             Ok(_) => Ok(None),
             Err(SchemaParserError::LexerError(LexerError::EOF)) => Ok(None),
@@ -574,6 +575,63 @@ fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()>
     Ok(())
 }
 
+fn parse_union_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+    // https://spec.graphql.org/draft/#sec-Unions
+
+    let Token { pos, .. } = required!(p, Name("union"), "invalid `union` identifier")?;
+    let name = required!(p, Name(_), "invalid union name")?;
+    let directives = parse_directives(p)?;
+    let _ = required!(p, EqualSign, "expected union `=` sign")?;
+
+    let types = parse_union_member_types(p, &name)?;
+
+    let union_type = UnionType {
+        pos,
+        description: None,
+        name: TypeName::from(name),
+        directives,
+        types,
+    };
+    let def = SchemaTopLevel::TypeDef(TypeDef::Union(union_type));
+    doc.definitions.push(def);
+    Ok(())
+}
+
+fn parse_union_member_types<'a>(
+    p: &SchemaParser<'a>,
+    parent: &Token<'a>,
+) -> Res<Vec<TypeName<'a>>> {
+    // https://spec.graphql.org/draft/#UnionMemberTypes
+    let mut members = Vec::new();
+    _ = optional!(p, Pipe)?;
+    loop {
+        let member = match p.peek() {
+            Err(_) => break,
+            Ok(member) => member,
+        };
+        match &member.val {
+            Name(_) => {
+                _ = p.next();
+                members.push(TypeName::from(member));
+                let pipe = optional!(p, Pipe);
+                match pipe {
+                    Err(_) => break,
+                    Ok(Some(Token { val: Pipe, .. })) => continue,
+                    Ok(_) => break,
+                }
+            }
+            _ => break,
+        }
+    }
+    if members.len() == 0 {
+        return Err(Error::syntax(
+            parent.clone(),
+            "union must have at least 1 member",
+        ));
+    }
+    Ok(members)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_interface_def() {
+    fn parses_interface_type() {
         let text = "interface Thing { name: String }";
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
@@ -792,7 +850,33 @@ mod tests {
             assert_eq!(*ty, Type::Name(TypeName("String")));
             assert_eq!(*arguments, vec![]);
         } else {
-            panic!("not object definition: {:?}", doc.definitions[0]);
+            panic!("not interface definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_union_type() {
+        let text = "union Thing = Other";
+        let doc = parse_schema(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        if let SchemaTopLevel::TypeDef(TypeDef::Union(UnionType {
+            pos,
+            description,
+            name,
+            directives,
+            types,
+        })) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, p(1, 1));
+            assert_eq!(*description, None);
+            assert_eq!(*name, TypeName("Thing"));
+            assert_eq!(*directives, vec![]);
+            assert_eq!(types.len(), 1);
+            let ty = &types[0];
+            // value assertions
+            assert_eq!(*ty, TypeName("Other"));
+        } else {
+            panic!("not union definition: {:?}", doc.definitions[0]);
         }
     }
 }
