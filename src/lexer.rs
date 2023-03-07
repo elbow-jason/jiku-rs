@@ -535,13 +535,13 @@ impl<'a> Lexer<'a> {
 
     fn next_number(&self, mut word: Word) -> Result<TokenValueStr<'a>, LexerError> {
         debug_assert!(word.len == 1);
-        word = word.add(self.consume_while(|c| c.is_numeric()));
-        word = word.add(self.consume_while(|c| c == '.' || c == 'e' || c == 'E'));
-        word = word.add(self.consume_while(|c| c == '-'));
-        word = word.add(self.consume_while(|c| c.is_numeric()));
-        word = word.add(self.consume_while(|c| c == 'e' || c == 'E'));
-        word = word.add(self.consume_while(|c| c == '-'));
-        word = word.add(self.consume_while(|c| c.is_numeric()));
+        word = word.add(self.consume_while(|c| {
+            c.is_alphanumeric()
+                || match c {
+                    '-' | '.' | 'e' | 'E' => true,
+                    _ => false,
+                }
+        }));
         let num = self.slice(word);
         if num == "-" {
             Ok(TokenValue::Unknown(num))
@@ -960,10 +960,7 @@ mod tests {
 
     #[test]
     fn lexer_neg_float_alone() {
-        let text = "-1.23";
-        let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Ok(tok(NumberLit("-1.23"), pos(1, 1))));
-        assert_eq!(lexer.next(), eof());
+        test_alone!("-1.23", NumberLit("-1.23"));
     }
 
     #[test]
@@ -982,63 +979,11 @@ mod tests {
     }
 
     #[test]
-    fn lexer_float_partial_exponent() {
-        let text = "-1.23e-";
-        let lexer = Lexer::new(text);
-        assert_eq!(
-            lexer.next(),
-            Err(LexerError::InvalidToken {
-                word: "-1.23e-".to_string(),
-                pos: pos(1, 1),
-                message: "invalid float exponent"
-            })
-        );
-        assert_eq!(lexer.next(), eof());
-    }
-
-    #[test]
-    fn lexer_float_missing_exponent() {
-        let text = "-1.23e";
-        let lexer = Lexer::new(text);
-        assert_eq!(
-            lexer.next(),
-            Err(LexerError::InvalidToken {
-                word: "-1.23e".to_string(),
-                pos: pos(1, 1),
-                message: "invalid float exponent"
-            })
-        );
-        assert_eq!(lexer.next(), eof());
-    }
-
-    #[test]
-    fn lexer_float_touching_e_name() {
-        let text = "-1.23emu-1234";
-        let lexer = Lexer::new(text);
-        assert_eq!(
-            lexer.next(),
-            Err(LexerError::InvalidToken {
-                word: "-1.23emu-1234".to_string(),
-                pos: pos(1, 1),
-                message: "invalid float exponent"
-            })
-        );
-        assert_eq!(lexer.next(), eof());
-    }
-
-    #[test]
-    fn lexer_float_touching_non_e_name() {
-        let text = "-1.23blep";
-        let lexer = Lexer::new(text);
-        assert_eq!(
-            lexer.next(),
-            Err(LexerError::InvalidToken {
-                word: "-1.23blep".to_string(),
-                pos: pos(1, 1),
-                message: "invalid float"
-            })
-        );
-        assert_eq!(lexer.next(), eof());
+    fn lexer_invalid_float_alone() {
+        test_alone!("-1.23e-", NumberLit("-1.23e-"));
+        test_alone!("-1.23e", NumberLit("-1.23e"));
+        test_alone!("-1.23emu-1234", NumberLit("-1.23emu-1234"));
+        test_alone!("-1.23blep", NumberLit("-1.23blep"));
     }
 
     #[test]
