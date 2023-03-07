@@ -166,12 +166,6 @@ pub fn parse_schema<'a>(text: &'a str) -> Res<SchemaDoc<'a>> {
     parse_schema_with_config(text, ParserConfig::default())
 }
 
-// TODO: parse descriptions that come before type definitions.
-// /// Holds stuff
-// struct ScopedContext<'a> {
-//     description: Option<Description<'a>>,
-// }
-
 pub fn parse_schema_with_config<'a>(text: &'a str, config: ParserConfig) -> Res<SchemaDoc<'a>> {
     let lexer = Lexer::new(&text[..].trim());
     let mut doc = SchemaDoc::new();
@@ -206,17 +200,17 @@ fn parse_top_level<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()>
 
 struct Context<'a> {
     description: Option<Description<'a>>,
-    top_level: Token<'a>,
     type_name: Option<TypeName<'a>>,
+    field_name: Option<FieldName<'a>>,
 }
 
 fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
     let description = parse_description(p)?;
     let top_level = p.peek()?;
     let ctx = Context {
-        top_level,
         description,
         type_name: None,
+        field_name: None,
     };
 
     match top_level.val {
@@ -316,6 +310,7 @@ fn parse_input_object_type<'a>(
     doc: &mut SchemaDoc<'a>,
     mut ctx: Context<'a>,
 ) -> Res<()> {
+    let description = ctx.description.take();
     let Token { pos, .. } = req!(p, Name("input"), "invalid `input` identifier")?;
     let name = req!(p, Name(_), "invalid input object name")?;
     let type_name = TypeName::from(name);
@@ -326,7 +321,7 @@ fn parse_input_object_type<'a>(
     let _ = req!(p, CloseCurly, "input object fields block did close")?;
     let input_object_type = InputObjectType {
         pos,
-        description: ctx.description,
+        description,
         name: type_name,
         directives,
         fields,
@@ -339,14 +334,16 @@ fn parse_input_object_type<'a>(
 fn parse_scalar_type<'a>(
     p: &SchemaParser<'a>,
     doc: &mut SchemaDoc<'a>,
-    ctx: Context<'a>,
+    mut ctx: Context<'a>,
 ) -> Res<()> {
     // https://spec.graphql.org/draft/#sec-Scalars
+
+    let description = ctx.description.take();
     let Token { pos, .. } = req!(p, Name("scalar"), "invalid `scalar` identifier")?;
     let name = req!(p, Name(_), "invalid scalar name")?;
     let directives = values::parse_directives(p)?;
     let scalar_type = ScalarType {
-        description: ctx.description,
+        description,
         pos,
         name: TypeName::from(name),
         directives,
@@ -550,8 +547,13 @@ fn parse_schema_def<'a>(
     }
 }
 
-fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>, ctx: Context<'a>) -> Res<()> {
+fn parse_enum_type<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    mut ctx: Context<'a>,
+) -> Res<()> {
     // https://spec.graphql.org/draft/#sec-Enums
+    let description = ctx.description.take();
     let Token { pos, .. } = req!(p, Name("enum"), "invalid `enum` identifier")?;
     let name = req!(p, Name(_), "invalid enum name")?;
     let directives = values::parse_directives(p)?;
@@ -560,7 +562,7 @@ fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>, ctx: Conte
     let _ = req!(p, CloseCurly, "object fields block did close")?;
     let enum_type = EnumType {
         pos,
-        description: ctx.description,
+        description,
         name: TypeName::from(name),
         directives,
         values,
@@ -573,10 +575,10 @@ fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>, ctx: Conte
 fn parse_union_type<'a>(
     p: &SchemaParser<'a>,
     doc: &mut SchemaDoc<'a>,
-    ctx: Context<'a>,
+    mut ctx: Context<'a>,
 ) -> Res<()> {
     // https://spec.graphql.org/draft/#sec-Unions
-
+    let description = ctx.description.take();
     let Token { pos, .. } = req!(p, Name("union"), "invalid `union` identifier")?;
     let name = req!(p, Name(_), "invalid union name")?;
     let directives = values::parse_directives(p)?;
@@ -586,7 +588,7 @@ fn parse_union_type<'a>(
 
     let union_type = UnionType {
         pos,
-        description: ctx.description,
+        description,
         name: TypeName::from(name),
         directives,
         types,
@@ -630,28 +632,6 @@ fn parse_union_member_types<'a>(
     }
     Ok(members)
 }
-
-// fn parse_arguments<'a>(p: &SchemaParser<'a>) -> Res<Vec<Argument<'a>>> {
-//     let mut arguments = Vec::new();
-//     loop {
-//         let tok = p.peek()?;
-//         match &tok.val {
-//             Name(_) => {
-//                 _ = p.next();
-//                 let name = FieldName::from(tok);
-//                 _ = req!(p, Colon, "expected ':' after arg name")?;
-//                 let value = parse_value(p)?;
-//                 arguments.push(Argument { name, value });
-//             }
-//             CloseParen => {
-//                 _ = p.next();
-//                 break;
-//             }
-//             _ => return Err(Error::syntax(tok, "expected argument name")),
-//         }
-//     }
-//     dbg!(Ok(arguments))
-// }
 
 #[cfg(test)]
 mod tests {
