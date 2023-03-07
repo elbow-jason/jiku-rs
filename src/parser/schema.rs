@@ -698,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_a_full_schema_def() {
+    fn parses_full_schema_def() {
         let text = r#"
         "some desc"
         schema @myDir(abc: 123) {
@@ -733,7 +733,7 @@ mod tests {
     fn parses_input_object_definition() {
         let text = r#"
         "some desc"
-        input ThingInput { name: String }
+        input ThingInput @thingDir(asd: 456) { name: String = "blep" }
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
@@ -748,7 +748,17 @@ mod tests {
             assert_eq!(*pos, p(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("ThingInput"));
-            assert_eq!(*directives, vec![]);
+            assert_eq!(
+                *directives,
+                vec![Directive {
+                    name: DirectiveName("@thingDir"),
+                    arguments: vec![Argument {
+                        name: FieldName("asd"),
+                        value: Value::Int(Int(456))
+                    }],
+                    location: None
+                }]
+            );
             assert_eq!(fields.len(), 1);
             let InputValueDef {
                 pos,
@@ -758,12 +768,12 @@ mod tests {
                 ty,
                 default_value,
             } = &fields[0];
-            assert_eq!(*pos, p(2, 28));
+            assert_eq!(*pos, p(2, 48));
             assert_eq!(*description, None);
             assert_eq!(*name, FieldName("name"));
             assert_eq!(directives.len(), 0);
             assert_eq!(*ty, Type::Name(TypeName("String")));
-            assert_eq!(*default_value, None);
+            assert_eq!(*default_value, Some(Value::String("\"blep\"")));
         } else {
             panic!("not input object definition: {:?}", doc.definitions[0]);
         }
