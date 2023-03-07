@@ -2,17 +2,6 @@ use std::collections::BTreeMap;
 
 use crate::{Pos, Token, TokenValue};
 use ord_float::Float64;
-// use std::ops::Deref;
-
-// #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-// pub struct Name<'a>(pub &'a str);
-
-// impl<'a> Deref for Name<'a> {
-//     type Target = str;
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeName<'a>(pub &'a str);
@@ -35,6 +24,19 @@ pub struct VariableName<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FieldName<'a>(pub &'a str);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InterfaceName<'a>(pub &'a str);
+
+impl<'a> From<Token<'a>> for FieldName<'a> {
+    fn from(token: Token<'a>) -> Self {
+        let val = match token.val {
+            TokenValue::Name(name) => name,
+            _ => unreachable!(),
+        };
+        FieldName(val)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Value<'a> {

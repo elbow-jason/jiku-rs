@@ -2,8 +2,9 @@
 // TODO: add context to parser for tracking/limiting parsing depth.
 //
 use crate::{
-    DefaultValue, Directive, DirectiveName, InputObjectType, InputValueDef, Lexer, LexerError, Pos,
-    SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue, Type, TypeDef, TypeName, Value,
+    DefaultValue, Directive, DirectiveName, FieldDef, FieldName, InputObjectType, InputValueDef,
+    Lexer, LexerError, ObjectType, Pos, SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue,
+    Type, TypeDef, TypeName, Value,
 };
 
 use thiserror::Error as ThisError;
@@ -170,6 +171,7 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
             match tok.val {
                 Name("schema") => parse_schema_def(p, doc),
                 Name("input") => parse_input_object_type(p, doc),
+                Name("type") => parse_object_type(p, doc),
                 _ => {
                     let message = "not a top-level token";
                     return Err(SchemaParserError::syntax(tok, message));
@@ -219,12 +221,32 @@ fn replace_none_token<'a>(
     Ok(slot)
 }
 
+fn parse_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+    let Token { pos, .. } = required!(p, Name("type"), "invalid `type` identifier")?;
+    let name = required!(p, Name(_), "invalid object name")?;
+    let directives = parse_directives(p)?;
+    let _ = required!(p, OpenCurly, "object fields block did not open")?;
+    let fields = parse_field_defs(p)?;
+    let _ = required!(p, CloseCurly, "object fields block did close")?;
+    let object_type = ObjectType {
+        pos,
+        description: None,
+        name: TypeName::from(name),
+        directives,
+        fields,
+        interfaces: vec![],
+    };
+    let def = SchemaTopLevel::TypeDef(TypeDef::Object(object_type));
+    doc.definitions.push(def);
+    Ok(())
+}
+
 fn parse_input_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
     let Token { pos, .. } = required!(p, Name("input"), "invalid `input` identifier")?;
     let name = required!(p, Name(_), "invalid input object name")?;
     let directives = parse_directives(p)?;
     let _ = required!(p, OpenCurly, "input object fields block did not open")?;
-    let fields = parse_input_fields(p)?;
+    let fields = parse_input_value_defs(p, CloseCurly, "invalid input object field")?;
     let _ = required!(p, CloseCurly, "input object fields block did close")?;
     let input_object_type = InputObjectType {
         pos,
@@ -238,7 +260,31 @@ fn parse_input_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) ->
     Ok(())
 }
 
-fn parse_input_fields<'a>(p: &SchemaParser<'a>) -> Res<Vec<InputValueDef<'a>>> {
+fn parse_input_value_defs<'a>(
+    p: &SchemaParser<'a>,
+    closer: TokenValue<&'a str>,
+    message: &'static str,
+) -> Res<Vec<InputValueDef<'a>>> {
+    let mut fields = Vec::new();
+    loop {
+        let tok = p.peek()?;
+        if tok.val == closer {
+            return Ok(fields);
+        }
+        match tok.val {
+            Name(_) => {
+                let ivd = parse_input_value_def(p)?;
+                fields.push(ivd);
+                continue;
+            }
+            _ => {
+                return Err(Error::syntax(tok, message));
+            }
+        }
+    }
+}
+
+fn parse_field_defs<'a>(p: &SchemaParser<'a>) -> Res<Vec<FieldDef<'a>>> {
     let mut fields = Vec::new();
     loop {
         let tok = p.peek()?;
@@ -246,12 +292,12 @@ fn parse_input_fields<'a>(p: &SchemaParser<'a>) -> Res<Vec<InputValueDef<'a>>> {
         match tok.val {
             CloseCurly => return Ok(fields),
             Name(_) => {
-                let ivd = parse_input_value_def(p)?;
-                fields.push(ivd);
+                let fd = parse_field_def(p)?;
+                fields.push(fd);
                 continue;
             }
             _ => {
-                let message = "not an input object field";
+                let message = "not an object field";
                 return Err(Error::syntax(tok, message));
             }
         }
@@ -272,9 +318,39 @@ fn parse_input_value_def<'a>(p: &SchemaParser<'a>) -> Res<InputValueDef<'a>> {
     let directives = parse_directives(p)?;
     let ivd = InputValueDef {
         pos,
-        name: TypeName::from(name),
+        name: FieldName::from(name),
         ty,
         default_value,
+        directives,
+        description: None,
+    };
+    Ok(ivd)
+}
+
+fn parse_field_def<'a>(p: &SchemaParser<'a>) -> Res<FieldDef<'a>> {
+    // https://spec.graphql.org/draft/#FieldDefinition
+    let name = required!(p, Name(_), "invalid object field name")?;
+    let pos = name.pos;
+    // only parse arguments if there is an open paren
+    let open_paren = optional!(p, OpenParen)?;
+    let arguments = if open_paren.is_some() {
+        parse_input_value_defs(p, CloseParen, "invalid arg")?
+    } else {
+        vec![]
+    };
+    let _ = required!(
+        p,
+        Colon,
+        "invalid object field - requires a colon after the field name and args"
+    )?;
+    let ty = parse_type(p)?;
+    let directives = parse_directives(p)?;
+
+    let ivd = FieldDef {
+        pos,
+        name: FieldName::from(name),
+        arguments,
+        ty,
         directives,
         description: None,
     };
@@ -469,7 +545,6 @@ mod tests {
             name,
             directives,
             fields,
-            ..
         })) = &doc.definitions[0]
         {
             assert_eq!(*pos, p(1, 1));
@@ -487,12 +562,50 @@ mod tests {
             } = &fields[0];
             assert_eq!(*pos, p(1, 20));
             assert_eq!(*description, None);
-            assert_eq!(*name, TypeName("name"));
+            assert_eq!(*name, FieldName("name"));
             assert_eq!(directives.len(), 0);
             assert_eq!(*ty, Type::Name(TypeName("String")));
             assert_eq!(*default_value, None);
         } else {
             panic!("not input object definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_object_definition() {
+        let text = "type Thing { name: String }";
+        let doc = parse_schema(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        if let SchemaTopLevel::TypeDef(TypeDef::Object(ObjectType {
+            pos,
+            description,
+            name,
+            directives,
+            fields,
+            ..
+        })) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, p(1, 1));
+            assert_eq!(*description, None);
+            assert_eq!(*name, TypeName("Thing"));
+            assert_eq!(*directives, vec![]);
+            assert_eq!(fields.len(), 1);
+            let FieldDef {
+                pos,
+                description,
+                name,
+                directives,
+                ty,
+                arguments,
+            } = &fields[0];
+            assert_eq!(*pos, p(1, 14));
+            assert_eq!(*description, None);
+            assert_eq!(*name, FieldName("name"));
+            assert_eq!(directives.len(), 0);
+            assert_eq!(*ty, Type::Name(TypeName("String")));
+            assert_eq!(*arguments, vec![]);
+        } else {
+            panic!("not object definition: {:?}", doc.definitions[0]);
         }
     }
 }

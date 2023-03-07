@@ -1,4 +1,6 @@
-use crate::{Directive, DirectiveName, FieldName, Pos, Token, Type, TypeName, Value};
+use crate::{
+    Directive, DirectiveName, FieldName, InterfaceName, Pos, Token, Type, TypeName, Value,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Description<'a> {
@@ -46,8 +48,8 @@ pub enum TypeDef<'a> {
 pub struct ObjectType<'a> {
     pub pos: Pos,
     pub description: Option<Description<'a>>,
-    pub name: &'a str,
-    pub implements_interfaces: Vec<&'a str>,
+    pub name: TypeName<'a>,
+    pub interfaces: Vec<InterfaceName<'a>>,
     pub directives: Vec<Directive<'a>>,
     pub fields: Vec<FieldDef<'a>>,
 }
@@ -75,6 +77,7 @@ pub struct FieldDef<'a> {
     pub ty: Type<'a>,
     pub directives: Vec<Directive<'a>>,
 }
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct InputObjectType<'a> {
     pub pos: Pos,
@@ -88,7 +91,7 @@ pub struct InputObjectType<'a> {
 pub struct InputValueDef<'a> {
     pub pos: Pos,
     pub description: Option<Description<'a>>,
-    pub name: TypeName<'a>,
+    pub name: FieldName<'a>,
     pub ty: Type<'a>,
     pub default_value: Option<Value<'a>>,
     pub directives: Vec<Directive<'a>>,
