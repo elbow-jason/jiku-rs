@@ -887,7 +887,10 @@ mod tests {
 
     #[test]
     fn parses_interface_type() {
-        let text = "interface Thing { name: String }";
+        let text = r#"
+        "some desc"
+        interface Thing { name: String }
+        "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
         if let SchemaTopLevel::TypeDef(TypeDef::Interface(InterfaceType {
@@ -899,8 +902,8 @@ mod tests {
             interfaces,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(1, 1));
-            assert_eq!(*description, None);
+            assert_eq!(*pos, p(2, 9));
+            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
             assert_eq!(*interfaces, vec![]);
@@ -913,7 +916,7 @@ mod tests {
                 ty,
                 arguments,
             } = &fields[0];
-            assert_eq!(*pos, p(1, 19));
+            assert_eq!(*pos, p(2, 27));
             assert_eq!(*description, None);
             assert_eq!(*name, FieldName("name"));
             assert_eq!(directives.len(), 0);
