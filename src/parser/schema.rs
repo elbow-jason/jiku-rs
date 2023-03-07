@@ -2,9 +2,9 @@
 // TODO: add context to parser for tracking/limiting parsing depth.
 //
 use crate::{
-    DefaultValue, Directive, DirectiveName, FieldDef, FieldName, InputObjectType, InputValueDef,
-    Lexer, LexerError, ObjectType, Pos, ScalarType, SchemaDef, SchemaDoc, SchemaTopLevel, Token,
-    TokenValue, Type, TypeDef, TypeName, Value,
+    DefaultValue, Directive, DirectiveName, EnumType, EnumValue, EnumValueName, FieldDef,
+    FieldName, InputObjectType, InputValueDef, Lexer, LexerError, ObjectType, Pos, ScalarType,
+    SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue, Type, TypeDef, TypeName, Value,
 };
 
 use thiserror::Error as ThisError;
@@ -173,6 +173,7 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
                 Name("input") => parse_input_object_type(p, doc),
                 Name("type") => parse_object_type(p, doc),
                 Name("scalar") => parse_scalar_type(p, doc),
+                Name("enum") => parse_enum_type(p, doc),
                 _ => {
                     let message = "not a top-level schema identifier";
                     return Err(SchemaParserError::syntax(tok, message));
@@ -499,6 +500,58 @@ fn parse_rest_directive<'a>(p: &SchemaParser<'a>, tok: Token<'a>) -> Res<Directi
     Err(Error::syntax(tok, "parse rest directive"))
 }
 
+fn parse_enum_value<'a>(p: &SchemaParser<'a>) -> Res<EnumValue<'a>> {
+    // https://spec.graphql.org/draft/#EnumValueDefinition
+    let description = None;
+    let name = required!(p, Name(_), "enum value name is required")?;
+    let directives = parse_directives(p)?;
+    let Token { pos, .. } = name;
+    Ok(EnumValue {
+        pos,
+        name: EnumValueName::from(name),
+        description,
+        directives,
+    })
+}
+
+fn parse_enum_values<'a>(p: &SchemaParser<'a>) -> Res<Vec<EnumValue<'a>>> {
+    let mut values = Vec::new();
+    loop {
+        let peeked = p.peek()?;
+        // look for description or name
+        match &peeked.val {
+            Name(_) => {
+                let value = parse_enum_value(p)?;
+                values.push(value);
+                continue;
+            }
+            StringLit(_) | BlockStringLit(_) => panic!("description not implemented: {:?}", peeked),
+            CloseCurly => return Ok(values),
+            _ => return Err(Error::syntax(peeked, "invalid enum value")),
+        }
+    }
+}
+
+fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+    // https://spec.graphql.org/draft/#sec-Enums
+    let Token { pos, .. } = required!(p, Name("enum"), "invalid `enum` identifier")?;
+    let name = required!(p, Name(_), "invalid enum name")?;
+    let directives = parse_directives(p)?;
+    let _ = required!(p, OpenCurly, "object fields block did not open")?;
+    let values = parse_enum_values(p)?;
+    let _ = required!(p, CloseCurly, "object fields block did close")?;
+    let enum_type = EnumType {
+        pos,
+        description: None,
+        name: TypeName::from(name),
+        directives,
+        values,
+    };
+    let def = SchemaTopLevel::TypeDef(TypeDef::Enum(enum_type));
+    doc.definitions.push(def);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -632,7 +685,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_scalar_def() {
+    fn parses_scalar_type() {
         let text = "scalar Thing";
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
@@ -649,6 +702,35 @@ mod tests {
             assert_eq!(*directives, vec![]);
         } else {
             panic!("not scalar definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_enum_type() {
+        let text = "enum Thing { GOOD }";
+        let doc = parse_schema(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        if let SchemaTopLevel::TypeDef(TypeDef::Enum(EnumType {
+            pos,
+            description,
+            name,
+            directives,
+            values,
+        })) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, p(1, 1));
+            assert_eq!(*description, None);
+            assert_eq!(*name, TypeName("Thing"));
+            assert_eq!(*directives, vec![]);
+            assert_eq!(values.len(), 1);
+            let value = &values[0];
+            // value assertions
+            assert_eq!(value.description, None);
+            assert_eq!(value.name, EnumValueName("GOOD"));
+            assert_eq!(value.pos, p(1, 14));
+            assert_eq!(value.directives.len(), 0);
+        } else {
+            panic!("not enum definition: {:?}", doc.definitions[0]);
         }
     }
 }
