@@ -40,9 +40,19 @@ pub enum TypeDef<'a> {
     Object(ObjectType<'a>),
     InputObject(InputObjectType<'a>),
     Scalar(ScalarType<'a>),
-    // Interface(InterfaceType<'a>),
+    Interface(InterfaceType<'a>),
     // Union(UnionType<'a>),
     Enum(EnumType<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceType<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub name: TypeName<'a>,
+    pub interfaces: Vec<InterfaceName<'a>>,
+    pub directives: Vec<Directive<'a>>,
+    pub fields: Vec<FieldDef<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
