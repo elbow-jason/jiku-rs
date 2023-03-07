@@ -41,8 +41,18 @@ pub enum TypeDef<'a> {
     InputObject(InputObjectType<'a>),
     Scalar(ScalarType<'a>),
     Interface(InterfaceType<'a>),
-    // Union(UnionType<'a>),
+    Union(UnionType<'a>),
     Enum(EnumType<'a>),
+}
+
+/// https://spec.graphql.org/draft/#sec-Unions
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnionType<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub name: TypeName<'a>,
+    pub directives: Vec<Directive<'a>>,
+    pub types: Vec<TypeName<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
