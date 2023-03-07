@@ -681,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn errors_when_variable_used_in_schema() {
+    fn errors_when_variable_name_encountered() {
         // used `schema` here because... reasons?
         let text = r#"
         schema @myDir(abc: $myVar) {}
@@ -698,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_schema_def_with_all_ops() {
+    fn parses_a_full_schema_def() {
         let text = r#"
         "some desc"
         schema @myDir(abc: 123) {
