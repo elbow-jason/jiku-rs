@@ -43,8 +43,8 @@ pub struct FieldName<'a>(pub &'a str);
 pub struct InterfaceName<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Value<'a> {
-    inner: ValueInner<'a>,
+pub struct ValuePos<'a> {
+    inner: Value<'a>,
     pos: Pos,
 }
 
@@ -53,7 +53,7 @@ pub struct DefaultValue<'a>(Value<'a>);
 
 #[derive(Debug, Clone, Eq, Ord, PartialOrd, Hash)]
 pub struct Map<'a> {
-    kvs: BTreeMap<&'a str, Value<'a>>,
+    kvs: BTreeMap<FieldName<'a>, Value<'a>>,
 }
 
 impl<'a> PartialEq for Map<'a> {
@@ -63,14 +63,15 @@ impl<'a> PartialEq for Map<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum ValueInner<'a> {
+pub enum Value<'a> {
     Variable(VariableName<'a>),
     Int(Int),
     Float(Float64),
-    // String(StringValue),
+    String(&'a str),
+    BlockString(&'a str),
     Boolean(bool),
     Null,
-    Enum(&'a str),
+    Enum(EnumValueName<'a>),
     List(Vec<Value<'a>>),
     Object(Map<'a>),
 }
