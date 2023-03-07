@@ -2,9 +2,9 @@
 // TODO: add context to parser for tracking/limiting parsing depth.
 //
 use crate::{
-    DefaultValue, Description, Directive, DirectiveName, EnumType, EnumValue, EnumValueName,
-    FieldDef, FieldName, InputObjectType, InputValueDef, InterfaceType, Lexer, LexerError,
-    ObjectType, Pos, ScalarType, SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue, Type,
+    DefaultValue, Definition, Description, Directive, DirectiveName, EnumType, EnumValue,
+    EnumValueName, FieldDef, FieldName, InputObjectType, InputValueDef, InterfaceType, Lexer,
+    LexerError, ObjectType, Pos, ScalarType, SchemaDef, SchemaDoc, Token, TokenValue, Type,
     TypeDef, TypeName, UnionType, Value,
 };
 
@@ -83,7 +83,7 @@ type Res<T> = std::result::Result<T, Error>;
 struct SchemaParser<'a> {
     lexer: Lexer<'a>,
     config: ParserConfig,
-    // definitions: Vec<SchemaTopLevelDefinition<'a>>,
+    // definitions: Vec<DefinitionDefinition<'a>>,
 }
 
 impl<'a> SchemaParser<'a> {
@@ -268,7 +268,7 @@ fn parse_object_type<'a>(
         fields,
         interfaces: vec![],
     };
-    let def = SchemaTopLevel::TypeDef(TypeDef::Object(object_type));
+    let def = Definition::TypeDef(TypeDef::Object(object_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -294,7 +294,7 @@ fn parse_interface_type<'a>(
         fields,
         interfaces: vec![],
     };
-    let def = SchemaTopLevel::TypeDef(TypeDef::Interface(interface_type));
+    let def = Definition::TypeDef(TypeDef::Interface(interface_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -319,7 +319,7 @@ fn parse_input_object_type<'a>(
         directives,
         fields,
     };
-    let def = SchemaTopLevel::TypeDef(TypeDef::InputObject(input_object_type));
+    let def = Definition::TypeDef(TypeDef::InputObject(input_object_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -339,7 +339,7 @@ fn parse_scalar_type<'a>(
         name: TypeName::from(name),
         directives,
     };
-    let def = SchemaTopLevel::TypeDef(TypeDef::Scalar(scalar_type));
+    let def = Definition::TypeDef(TypeDef::Scalar(scalar_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -530,7 +530,7 @@ fn parse_schema_def<'a>(
                         directives,
                         description,
                     };
-                    let def = SchemaTopLevel::SchemaDef(sd);
+                    let def = Definition::SchemaDef(sd);
                     doc.definitions.push(def);
                     return Ok(());
                 }
@@ -619,7 +619,7 @@ fn parse_enum_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>, ctx: Conte
         directives,
         values,
     };
-    let def = SchemaTopLevel::TypeDef(TypeDef::Enum(enum_type));
+    let def = Definition::TypeDef(TypeDef::Enum(enum_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -645,7 +645,7 @@ fn parse_union_type<'a>(
         directives,
         types,
     };
-    let def = SchemaTopLevel::TypeDef(TypeDef::Union(union_type));
+    let def = Definition::TypeDef(TypeDef::Union(union_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -699,7 +699,7 @@ mod tests {
         let text = "schema {}";
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let SchemaTopLevel::SchemaDef(SchemaDef {
+        if let Definition::SchemaDef(SchemaDef {
             pos,
             query,
             mutation,
@@ -727,7 +727,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let SchemaTopLevel::SchemaDef(SchemaDef {
+        if let Definition::SchemaDef(SchemaDef {
             pos,
             query,
             mutation,
@@ -755,7 +755,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let SchemaTopLevel::TypeDef(TypeDef::InputObject(InputObjectType {
+        if let Definition::TypeDef(TypeDef::InputObject(InputObjectType {
             pos,
             description,
             name,
@@ -795,7 +795,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let SchemaTopLevel::TypeDef(TypeDef::Object(ObjectType {
+        if let Definition::TypeDef(TypeDef::Object(ObjectType {
             pos,
             description,
             name,
@@ -837,7 +837,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let SchemaTopLevel::TypeDef(TypeDef::Scalar(ScalarType {
+        if let Definition::TypeDef(TypeDef::Scalar(ScalarType {
             pos,
             description,
             name,
@@ -861,7 +861,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let SchemaTopLevel::TypeDef(TypeDef::Enum(EnumType {
+        if let Definition::TypeDef(TypeDef::Enum(EnumType {
             pos,
             description,
             name,
@@ -893,7 +893,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let SchemaTopLevel::TypeDef(TypeDef::Interface(InterfaceType {
+        if let Definition::TypeDef(TypeDef::Interface(InterfaceType {
             pos,
             description,
             name,
@@ -935,7 +935,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let SchemaTopLevel::TypeDef(TypeDef::Union(UnionType {
+        if let Definition::TypeDef(TypeDef::Union(UnionType {
             pos,
             description,
             name,

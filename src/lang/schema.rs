@@ -16,7 +16,7 @@ impl<'a> Description<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaDoc<'a> {
-    pub definitions: Vec<SchemaTopLevel<'a>>,
+    pub definitions: Vec<Definition<'a>>,
 }
 
 impl<'a> SchemaDoc<'a> {
@@ -28,7 +28,7 @@ impl<'a> SchemaDoc<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SchemaTopLevel<'a> {
+pub enum Definition<'a> {
     SchemaDef(SchemaDef<'a>),
     TypeDef(TypeDef<'a>),
     TypeExt(TypeExt<'a>),
