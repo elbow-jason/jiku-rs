@@ -912,7 +912,10 @@ mod tests {
             assert_eq!(*directives, vec![]);
             assert_eq!(values.len(), 2);
             let value = &values[0];
-            assert_eq!(value.description.unwrap().as_str(), "\"it's good\"");
+            assert_eq!(
+                value.description.unwrap().tok.val,
+                StringLit("\"it's good\"")
+            );
             assert_eq!(value.description.unwrap().tok.pos, p(3, 13));
             assert_eq!(value.name, EnumValueName("GOOD"));
             assert_eq!(value.pos, p(4, 13));
