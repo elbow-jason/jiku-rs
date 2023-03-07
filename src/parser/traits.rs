@@ -5,6 +5,27 @@ pub trait Parser<'a> {
 
     fn peek(&self) -> Result<Token<'a>, Self::Error>;
     fn next(&self) -> Result<Token<'a>, Self::Error>;
+    // fn check_value(tok: Token<'a>) -> Result<(), Self::Error>;
+
+    fn syntax_err<'e>(&self, tok: Token<'e>, message: &'static str) -> Self::Error {
+        Self::Error::syntax(tok, message)
+    }
+
+    fn already_exists_err<'e>(&self, tok: Token<'e>, message: &'static str) -> Self::Error {
+        Self::Error::already_exists(tok, message)
+    }
+
+    fn int_err<'e>(&self, tok: Token<'e>) -> Self::Error {
+        Self::Error::int(tok)
+    }
+
+    fn float_err<'e>(&self, tok: Token<'e>) -> Self::Error {
+        Self::Error::float(tok)
+    }
+
+    fn is_eof_err(&self, err: &Self::Error) -> bool {
+        Self::Error::is_eof(err)
+    }
 }
 
 pub trait ParserError {
@@ -17,10 +38,10 @@ pub trait ParserError {
 
 #[macro_export]
 macro_rules! required {
-    ($p:expr, $val:pat, $err_t:ty, $message:expr) => {{
+    ($p:expr, $val:pat, $message:expr) => {{
         match $p.next() {
             ok_tok @ Ok($crate::Token { val: $val, .. }) => ok_tok,
-            Ok(tok) => Err(<$err_t>::syntax(tok, $message)),
+            Ok(tok) => Err($p.syntax_err(tok, $message)),
             Err(e) => Err(e.into()),
         }
     }};
@@ -28,7 +49,7 @@ macro_rules! required {
 
 #[macro_export]
 macro_rules! optional {
-    ($p:expr, $val:pat, $err_t:ty) => {{
+    ($p:expr, $val:pat) => {{
         use $crate::TokenValue::*;
         match $p.peek() {
             Ok(tok @ $crate::Token { val: $val, .. }) => {
@@ -37,7 +58,7 @@ macro_rules! optional {
             }
             Ok(_) => Ok(None),
             Err(err) => {
-                if <$err_t>::is_eof(&err) {
+                if $p.is_eof_err(&err) {
                     Ok(None)
                 } else {
                     Err(err)

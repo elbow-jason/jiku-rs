@@ -6,7 +6,6 @@ use crate::{
     EnumType, EnumValue, EnumValueName, FieldDef, FieldName, Float64, InputObjectType,
     InputValueDef, InterfaceType, Lexer, LexerError, ObjectType, Pos, ScalarType, SchemaDef,
     SchemaDoc, Token, TokenValue, Type, TypeDef, TypeName, UnionType, Value,
-    VariableName as VarName,
 };
 
 use super::traits::{Parser, ParserError};
@@ -15,17 +14,17 @@ use super::values;
 use thiserror::Error as ThisError;
 use TokenValue::*;
 
-macro_rules! req {
-    ($p:expr, $val:pat, $message:expr) => {
-        required!($p, $val, SchemaParserError, $message)
-    };
-}
+// macro_rules! req {
+//     ($p:expr, $val:pat, $message:expr) => {
+//         required!($p, $val, $message)
+//     };
+// }
 
-macro_rules! opt {
-    ($p:expr, $val:pat) => {
-        optional!($p, $val, SchemaParserError)
-    };
-}
+// macro_rules! opt {
+//     ($p:expr, $val:pat) => {
+//         optional!($p, $val, SchemaParserError)
+//     };
+// }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParserConfig {
@@ -77,6 +76,9 @@ pub enum SchemaParserError {
 
     #[error("invalid int value: {value:?} {pos:?}")]
     ParseIntError { value: TokenValue<String>, pos: Pos },
+
+    #[error("variables are not allowed in schema docs: {value:?} {pos:?}")]
+    VariablesNotAllowed { value: TokenValue<String>, pos: Pos },
 }
 
 impl ParserError for SchemaParserError {
@@ -141,7 +143,7 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
 
             match token.val {
                 Space | Tab | Newline | Comma => continue,
-                _ => return Ok(token),
+                _ => return Ok(check_no_variables(token)?),
             }
         }
     }
@@ -156,9 +158,20 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
                     _ = self.lexer.next();
                     continue;
                 }
-                _ => return Ok(token),
+
+                _ => return Ok(check_no_variables(token)?),
             }
         }
+    }
+}
+
+fn check_no_variables<'a>(tok: Token<'a>) -> Res<Token<'a>> {
+    match tok.val {
+        VariableName(_) => Err(SchemaParserError::VariablesNotAllowed {
+            value: tok.val.to_owned(),
+            pos: tok.pos,
+        }),
+        _ => Ok(tok),
     }
 }
 
@@ -259,13 +272,13 @@ fn parse_object_type<'a>(
 ) -> Res<()> {
     // context
     let description = ctx.description.take();
-    let Token { pos, .. } = req!(p, Name("type"), "invalid `type` identifier")?;
-    let name = req!(p, Name(_), "invalid object name")?;
+    let Token { pos, .. } = required!(p, Name("type"), "invalid `type` identifier")?;
+    let name = required!(p, Name(_), "invalid object name")?;
     ctx.type_name = Some(TypeName::from(name));
     let directives = values::parse_directives(p)?;
-    let _ = req!(p, OpenCurly, "object fields block did not open")?;
+    let _ = required!(p, OpenCurly, "object fields block did not open")?;
     let fields = parse_field_defs(p)?;
-    let _ = req!(p, CloseCurly, "object fields block did close")?;
+    let _ = required!(p, CloseCurly, "object fields block did close")?;
     let object_type = ObjectType {
         pos,
         description,
@@ -285,13 +298,13 @@ fn parse_interface_type<'a>(
     mut ctx: Context<'a>,
 ) -> Res<()> {
     let description = ctx.description.take();
-    let Token { pos, .. } = req!(p, Name("interface"), "invalid `interface` identifier")?;
-    let name = req!(p, Name(_), "invalid interface name")?;
+    let Token { pos, .. } = required!(p, Name("interface"), "invalid `interface` identifier")?;
+    let name = required!(p, Name(_), "invalid interface name")?;
     ctx.type_name = Some(TypeName::from(name));
     let directives = values::parse_directives(p)?;
-    let _ = req!(p, OpenCurly, "interface fields block did not open")?;
+    let _ = required!(p, OpenCurly, "interface fields block did not open")?;
     let fields = parse_field_defs(p)?;
-    let _ = req!(p, CloseCurly, "interface fields block did close")?;
+    let _ = required!(p, CloseCurly, "interface fields block did close")?;
     let interface_type = InterfaceType {
         pos,
         description,
@@ -311,14 +324,14 @@ fn parse_input_object_type<'a>(
     mut ctx: Context<'a>,
 ) -> Res<()> {
     let description = ctx.description.take();
-    let Token { pos, .. } = req!(p, Name("input"), "invalid `input` identifier")?;
-    let name = req!(p, Name(_), "invalid input object name")?;
+    let Token { pos, .. } = required!(p, Name("input"), "invalid `input` identifier")?;
+    let name = required!(p, Name(_), "invalid input object name")?;
     let type_name = TypeName::from(name);
     ctx.type_name = Some(type_name);
     let directives = values::parse_directives(p)?;
-    let _ = req!(p, OpenCurly, "input object fields block did not open")?;
+    let _ = required!(p, OpenCurly, "input object fields block did not open")?;
     let fields = parse_input_value_defs(p, CloseCurly, "invalid input object field")?;
-    let _ = req!(p, CloseCurly, "input object fields block did close")?;
+    let _ = required!(p, CloseCurly, "input object fields block did close")?;
     let input_object_type = InputObjectType {
         pos,
         description,
@@ -339,8 +352,8 @@ fn parse_scalar_type<'a>(
     // https://spec.graphql.org/draft/#sec-Scalars
 
     let description = ctx.description.take();
-    let Token { pos, .. } = req!(p, Name("scalar"), "invalid `scalar` identifier")?;
-    let name = req!(p, Name(_), "invalid scalar name")?;
+    let Token { pos, .. } = required!(p, Name("scalar"), "invalid `scalar` identifier")?;
+    let name = required!(p, Name(_), "invalid scalar name")?;
     let directives = values::parse_directives(p)?;
     let scalar_type = ScalarType {
         description,
@@ -399,9 +412,9 @@ fn parse_field_defs<'a>(p: &SchemaParser<'a>) -> Res<Vec<FieldDef<'a>>> {
 
 fn parse_input_value_def<'a>(p: &SchemaParser<'a>) -> Res<InputValueDef<'a>> {
     // https://spec.graphql.org/draft/#InputValueDefinition
-    let name = req!(p, Name(_), "invalid input object field name")?;
+    let name = required!(p, Name(_), "invalid input object field name")?;
     let pos = name.pos;
-    let _ = req!(
+    let _ = required!(
         p,
         Colon,
         "input object field requires a colon after the field name"
@@ -422,16 +435,16 @@ fn parse_input_value_def<'a>(p: &SchemaParser<'a>) -> Res<InputValueDef<'a>> {
 
 fn parse_field_def<'a>(p: &SchemaParser<'a>) -> Res<FieldDef<'a>> {
     // https://spec.graphql.org/draft/#FieldDefinition
-    let name = req!(p, Name(_), "invalid object field name")?;
+    let name = required!(p, Name(_), "invalid object field name")?;
     let pos = name.pos;
     // only parse arguments if there is an open paren
-    let open_paren = opt!(p, OpenParen)?;
+    let open_paren = optional!(p, OpenParen)?;
     let arguments = if open_paren.is_some() {
         parse_input_value_defs(p, CloseParen, "invalid arg")?
     } else {
         vec![]
     };
-    let _ = req!(
+    let _ = required!(
         p,
         Colon,
         "invalid object field - requires a colon after the field name and args"
@@ -458,19 +471,19 @@ fn parse_type<'a>(p: &SchemaParser<'a>) -> Res<Type<'a>> {
         OpenBracket => {
             _ = p.next()?;
             let item_type = parse_type(p)?;
-            _ = req!(p, CloseBracket, "list type had no closing bracket")?;
+            _ = required!(p, CloseBracket, "list type had no closing bracket")?;
             Type::List(Box::new(item_type))
         }
         Name(_) => {
-            // this name = req! can never fail (we just peeked the name),
+            // this name = required! can never fail (we just peeked the name),
             // but we leave the message in place so we'll get a nice error
             // message if ever...
-            let name = req!(p, Name(_), "type requires a name").unwrap();
+            let name = required!(p, Name(_), "type requires a name").unwrap();
             Type::Name(TypeName::from(name))
         }
         _ => return Err(Error::syntax(tok, "type name")),
     };
-    let bang = opt!(p, Bang)?;
+    let bang = optional!(p, Bang)?;
     if bang.is_some() {
         return Ok(Type::NonNull(Box::new(ty)));
     }
@@ -483,9 +496,9 @@ fn parse_schema_def<'a>(
     mut ctx: Context<'a>,
 ) -> Res<()> {
     let description = ctx.description.take();
-    let schema = req!(p, Name("schema"), "expected top-level keyword `schema`")?;
+    let schema = required!(p, Name("schema"), "expected top-level keyword `schema`")?;
     let directives = values::parse_directives(p)?;
-    let _ = req!(
+    let _ = required!(
         p,
         OpenCurly,
         "schema fields did not open with curly brackets"
@@ -500,28 +513,28 @@ fn parse_schema_def<'a>(
         match p.next() {
             Ok(field_tok) => match field_tok.val {
                 Name("query") => {
-                    let _ = req!(p, Colon, "schema query field must be followed by a colon")?;
-                    let tok = req!(p, Name(_), "schema query requires a name")?;
+                    let _ = required!(p, Colon, "schema query field must be followed by a colon")?;
+                    let tok = required!(p, Name(_), "schema query requires a name")?;
                     let msg = "schema definition can only have one root query";
                     q = replace_none_token(q, tok, msg)?;
                 }
                 Name("mutation") => {
-                    let _ = req!(
+                    let _ = required!(
                         p,
                         Colon,
                         "schema mutation field must be followed by a colon"
                     )?;
-                    let tok = req!(p, Name(_), "schema mutation requires a name")?;
+                    let tok = required!(p, Name(_), "schema mutation requires a name")?;
                     let msg = "schema definition can only have one root mutation";
                     m = replace_none_token(m, tok, msg)?;
                 }
                 Name("subscription") => {
-                    let _ = req!(
+                    let _ = required!(
                         p,
                         Colon,
                         "schema subscription field must be followed by a colon"
                     )?;
-                    let tok = req!(p, Name(_), "schema subscription requires a name")?;
+                    let tok = required!(p, Name(_), "schema subscription requires a name")?;
                     let msg = "schema definition can only have one root subscription";
                     s = replace_none_token(s, tok, msg)?;
                 }
@@ -554,12 +567,12 @@ fn parse_enum_type<'a>(
 ) -> Res<()> {
     // https://spec.graphql.org/draft/#sec-Enums
     let description = ctx.description.take();
-    let Token { pos, .. } = req!(p, Name("enum"), "invalid `enum` identifier")?;
-    let name = req!(p, Name(_), "invalid enum name")?;
+    let Token { pos, .. } = required!(p, Name("enum"), "invalid `enum` identifier")?;
+    let name = required!(p, Name(_), "invalid enum name")?;
     let directives = values::parse_directives(p)?;
-    let _ = req!(p, OpenCurly, "object fields block did not open")?;
+    let _ = required!(p, OpenCurly, "object fields block did not open")?;
     let values = values::parse_enum_values(p)?;
-    let _ = req!(p, CloseCurly, "object fields block did close")?;
+    let _ = required!(p, CloseCurly, "object fields block did close")?;
     let enum_type = EnumType {
         pos,
         description,
@@ -579,10 +592,10 @@ fn parse_union_type<'a>(
 ) -> Res<()> {
     // https://spec.graphql.org/draft/#sec-Unions
     let description = ctx.description.take();
-    let Token { pos, .. } = req!(p, Name("union"), "invalid `union` identifier")?;
-    let name = req!(p, Name(_), "invalid union name")?;
+    let Token { pos, .. } = required!(p, Name("union"), "invalid `union` identifier")?;
+    let name = required!(p, Name(_), "invalid union name")?;
     let directives = values::parse_directives(p)?;
-    let _ = req!(p, EqualSign, "expected union `=` sign")?;
+    let _ = required!(p, EqualSign, "expected union `=` sign")?;
 
     let types = parse_union_member_types(p, &name)?;
 
@@ -604,7 +617,7 @@ fn parse_union_member_types<'a>(
 ) -> Res<Vec<TypeName<'a>>> {
     // https://spec.graphql.org/draft/#UnionMemberTypes
     let mut members = Vec::new();
-    _ = opt!(p, Pipe)?;
+    _ = optional!(p, Pipe)?;
     loop {
         let member = match p.peek() {
             Err(_) => break,
@@ -614,7 +627,7 @@ fn parse_union_member_types<'a>(
             Name(_) => {
                 _ = p.next();
                 members.push(TypeName::from(member));
-                let pipe = opt!(p, Pipe);
+                let pipe = optional!(p, Pipe);
                 match pipe {
                     Err(_) => break,
                     Ok(Some(Token { val: Pipe, .. })) => continue,
@@ -665,6 +678,23 @@ mod tests {
         } else {
             panic!("not schema definition: {:?}", doc.definitions[0]);
         }
+    }
+
+    #[test]
+    fn errors_when_variable_used_in_schema() {
+        // used `schema` here because... reasons?
+        let text = r#"
+        schema @myDir(abc: $myVar) {}
+        "#;
+        let res = parse_schema(text);
+
+        assert_eq!(
+            res,
+            Err(SchemaParserError::VariablesNotAllowed {
+                value: TokenValue::VariableName("$myVar".to_string()),
+                pos: p(1, 20)
+            })
+        );
     }
 
     #[test]

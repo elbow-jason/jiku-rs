@@ -11,8 +11,8 @@ use crate::{
 use TokenValue::*;
 
 pub fn parse_directive<'a, P: Parser<'a>>(p: &P) -> Result<Directive<'a>, P::Error> {
-    let name = required!(p, DirectiveName(_), P::Error, "invalid directive name")?;
-    let open_paren = optional!(p, OpenParen, P::Error)?;
+    let name = required!(p, DirectiveName(_), "invalid directive name")?;
+    let open_paren = optional!(p, OpenParen)?;
     let arguments = if open_paren.is_some() {
         parse_arguments(p)?
     } else {
@@ -34,7 +34,7 @@ pub fn parse_arguments<'a, P: Parser<'a>>(p: &P) -> Result<Vec<Argument<'a>>, P:
             Name(_) => {
                 _ = p.next();
                 let name = FieldName::from(tok);
-                _ = required!(p, Colon, P::Error, "expected ':' after arg name")?;
+                _ = required!(p, Colon, "expected ':' after arg name")?;
                 let value = parse_value(p)?;
                 arguments.push(Argument { name, value });
             }
@@ -121,7 +121,7 @@ pub fn parse_directives<'a, P: Parser<'a>>(p: &P) -> Result<Vec<Directive<'a>>, 
 pub fn parse_enum_value<'a, P: Parser<'a>>(p: &P) -> Result<EnumValue<'a>, P::Error> {
     // https://spec.graphql.org/draft/#EnumValueDefinition
     let description = None;
-    let name = required!(p, Name(_), P::Error, "enum value name is required")?;
+    let name = required!(p, Name(_), "enum value name is required")?;
     let directives = parse_directives(p)?;
     let Token { pos, .. } = name;
     Ok(EnumValue {
@@ -151,7 +151,7 @@ pub fn parse_enum_values<'a, P: Parser<'a>>(p: &P) -> Result<Vec<EnumValue<'a>>,
 }
 
 pub fn parse_default_value<'a, P: Parser<'a>>(p: &P) -> Result<Option<Value<'a>>, P::Error> {
-    let equals = optional!(p, EqualSign, P::Error)?;
+    let equals = optional!(p, EqualSign)?;
     if equals.is_none() {
         // there is no equals sign. there is no default value.
         return Ok(None);
