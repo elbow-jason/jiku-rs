@@ -23,6 +23,9 @@ pub struct DirectiveName<'a>(pub &'a str);
 pub struct VariableName<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EnumValueName<'a>(pub &'a str);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FieldName<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -1,5 +1,6 @@
 use crate::{
-    Directive, DirectiveName, FieldName, InterfaceName, Pos, Token, Type, TypeName, Value,
+    Directive, DirectiveName, EnumValueName, FieldName, InterfaceName, Pos, Token, Type, TypeName,
+    Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -41,7 +42,24 @@ pub enum TypeDef<'a> {
     Scalar(ScalarType<'a>),
     // Interface(InterfaceType<'a>),
     // Union(UnionType<'a>),
-    // Enum(EnumType<'a>),
+    Enum(EnumType<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumType<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub name: TypeName<'a>,
+    pub directives: Vec<Directive<'a>>,
+    pub values: Vec<EnumValue<'a>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumValue<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub name: EnumValueName<'a>,
+    pub directives: Vec<Directive<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
