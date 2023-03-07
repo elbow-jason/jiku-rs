@@ -855,7 +855,10 @@ mod tests {
 
     #[test]
     fn parses_enum_type() {
-        let text = "enum Thing { GOOD }";
+        let text = r#"
+        "some desc"
+        enum Thing { GOOD }
+        "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
         if let SchemaTopLevel::TypeDef(TypeDef::Enum(EnumType {
@@ -866,8 +869,8 @@ mod tests {
             values,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(1, 1));
-            assert_eq!(*description, None);
+            assert_eq!(*pos, p(2, 9));
+            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
             assert_eq!(values.len(), 1);
@@ -875,7 +878,7 @@ mod tests {
             // value assertions
             assert_eq!(value.description, None);
             assert_eq!(value.name, EnumValueName("GOOD"));
-            assert_eq!(value.pos, p(1, 14));
+            assert_eq!(value.pos, p(2, 22));
             assert_eq!(value.directives.len(), 0);
         } else {
             panic!("not enum definition: {:?}", doc.definitions[0]);
