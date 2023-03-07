@@ -3,8 +3,9 @@
 //
 use crate::{
     DefaultValue, Directive, DirectiveName, EnumType, EnumValue, EnumValueName, FieldDef,
-    FieldName, InputObjectType, InputValueDef, Lexer, LexerError, ObjectType, Pos, ScalarType,
-    SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue, Type, TypeDef, TypeName, Value,
+    FieldName, InputObjectType, InputValueDef, InterfaceType, Lexer, LexerError, ObjectType, Pos,
+    ScalarType, SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue, Type, TypeDef, TypeName,
+    Value,
 };
 
 use thiserror::Error as ThisError;
@@ -174,6 +175,7 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
                 Name("type") => parse_object_type(p, doc),
                 Name("scalar") => parse_scalar_type(p, doc),
                 Name("enum") => parse_enum_type(p, doc),
+                Name("interface") => parse_interface_type(p, doc),
                 _ => {
                     let message = "not a top-level schema identifier";
                     return Err(SchemaParserError::syntax(tok, message));
@@ -239,6 +241,26 @@ fn parse_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<(
         interfaces: vec![],
     };
     let def = SchemaTopLevel::TypeDef(TypeDef::Object(object_type));
+    doc.definitions.push(def);
+    Ok(())
+}
+
+fn parse_interface_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+    let Token { pos, .. } = required!(p, Name("interface"), "invalid `interface` identifier")?;
+    let name = required!(p, Name(_), "invalid interface name")?;
+    let directives = parse_directives(p)?;
+    let _ = required!(p, OpenCurly, "interface fields block did not open")?;
+    let fields = parse_field_defs(p)?;
+    let _ = required!(p, CloseCurly, "interface fields block did close")?;
+    let interface_type = InterfaceType {
+        pos,
+        description: None,
+        name: TypeName::from(name),
+        directives,
+        fields,
+        interfaces: vec![],
+    };
+    let def = SchemaTopLevel::TypeDef(TypeDef::Interface(interface_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -315,7 +337,7 @@ fn parse_field_defs<'a>(p: &SchemaParser<'a>) -> Res<Vec<FieldDef<'a>>> {
                 continue;
             }
             _ => {
-                let message = "not an object field";
+                let message = "invalid field definition";
                 return Err(Error::syntax(tok, message));
             }
         }
@@ -657,13 +679,14 @@ mod tests {
             name,
             directives,
             fields,
-            ..
+            interfaces,
         })) = &doc.definitions[0]
         {
             assert_eq!(*pos, p(1, 1));
             assert_eq!(*description, None);
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
+            assert_eq!(*interfaces, vec![]);
             assert_eq!(fields.len(), 1);
             let FieldDef {
                 pos,
@@ -731,6 +754,45 @@ mod tests {
             assert_eq!(value.directives.len(), 0);
         } else {
             panic!("not enum definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_interface_def() {
+        let text = "interface Thing { name: String }";
+        let doc = parse_schema(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        if let SchemaTopLevel::TypeDef(TypeDef::Interface(InterfaceType {
+            pos,
+            description,
+            name,
+            directives,
+            fields,
+            interfaces,
+        })) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, p(1, 1));
+            assert_eq!(*description, None);
+            assert_eq!(*name, TypeName("Thing"));
+            assert_eq!(*directives, vec![]);
+            assert_eq!(*interfaces, vec![]);
+            assert_eq!(fields.len(), 1);
+            let FieldDef {
+                pos,
+                description,
+                name,
+                directives,
+                ty,
+                arguments,
+            } = &fields[0];
+            assert_eq!(*pos, p(1, 19));
+            assert_eq!(*description, None);
+            assert_eq!(*name, FieldName("name"));
+            assert_eq!(directives.len(), 0);
+            assert_eq!(*ty, Type::Name(TypeName("String")));
+            assert_eq!(*arguments, vec![]);
+        } else {
+            panic!("not object definition: {:?}", doc.definitions[0]);
         }
     }
 }
