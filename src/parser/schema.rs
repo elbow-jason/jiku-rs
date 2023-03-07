@@ -789,7 +789,10 @@ mod tests {
 
     #[test]
     fn parses_object_def() {
-        let text = "type Thing { name: String }";
+        let text = r#"
+        "some desc"
+        type Thing { name: String }
+        "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
         if let SchemaTopLevel::TypeDef(TypeDef::Object(ObjectType {
@@ -801,8 +804,8 @@ mod tests {
             interfaces,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(1, 1));
-            assert_eq!(*description, None);
+            assert_eq!(*pos, p(2, 9));
+            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
             assert_eq!(*interfaces, vec![]);
@@ -815,7 +818,7 @@ mod tests {
                 ty,
                 arguments,
             } = &fields[0];
-            assert_eq!(*pos, p(1, 14));
+            assert_eq!(*pos, p(2, 22));
             assert_eq!(*description, None);
             assert_eq!(*name, FieldName("name"));
             assert_eq!(directives.len(), 0);
