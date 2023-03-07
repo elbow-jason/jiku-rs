@@ -410,7 +410,7 @@ fn parse_input_value_def<'a>(p: &SchemaParser<'a>) -> Res<InputValueDef<'a>> {
         "input object field requires a colon after the field name"
     )?;
     let ty = parse_type(p)?;
-    let default_value = parse_default_value(p)?;
+    let default_value = values::parse_default_value(p)?;
     let directives = values::parse_directives(p)?;
     let ivd = InputValueDef {
         pos,
@@ -480,9 +480,6 @@ fn parse_type<'a>(p: &SchemaParser<'a>) -> Res<Type<'a>> {
     Ok(ty)
 }
 
-fn parse_default_value<'a>(_p: &SchemaParser<'a>) -> Res<Option<Value<'a>>> {
-    Ok(None)
-}
 fn parse_schema_def<'a>(
     p: &SchemaParser<'a>,
     doc: &mut SchemaDoc<'a>,

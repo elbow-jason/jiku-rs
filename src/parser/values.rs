@@ -149,3 +149,13 @@ pub fn parse_enum_values<'a, P: Parser<'a>>(p: &P) -> Result<Vec<EnumValue<'a>>,
         }
     }
 }
+
+pub fn parse_default_value<'a, P: Parser<'a>>(p: &P) -> Result<Option<Value<'a>>, P::Error> {
+    let equals = optional!(p, EqualSign, P::Error)?;
+    if equals.is_none() {
+        // there is no equals sign. there is no default value.
+        return Ok(None);
+    }
+    let value = parse_value(p)?;
+    Ok(Some(value))
+}
