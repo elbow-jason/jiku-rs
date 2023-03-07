@@ -3,8 +3,8 @@
 //
 use crate::{
     DefaultValue, Directive, DirectiveName, FieldDef, FieldName, InputObjectType, InputValueDef,
-    Lexer, LexerError, ObjectType, Pos, SchemaDef, SchemaDoc, SchemaTopLevel, Token, TokenValue,
-    Type, TypeDef, TypeName, Value,
+    Lexer, LexerError, ObjectType, Pos, ScalarType, SchemaDef, SchemaDoc, SchemaTopLevel, Token,
+    TokenValue, Type, TypeDef, TypeName, Value,
 };
 
 use thiserror::Error as ThisError;
@@ -172,8 +172,9 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
                 Name("schema") => parse_schema_def(p, doc),
                 Name("input") => parse_input_object_type(p, doc),
                 Name("type") => parse_object_type(p, doc),
+                Name("scalar") => parse_scalar_type(p, doc),
                 _ => {
-                    let message = "not a top-level token";
+                    let message = "not a top-level schema identifier";
                     return Err(SchemaParserError::syntax(tok, message));
                 }
             }
@@ -256,6 +257,22 @@ fn parse_input_object_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) ->
         fields,
     };
     let def = SchemaTopLevel::TypeDef(TypeDef::InputObject(input_object_type));
+    doc.definitions.push(def);
+    Ok(())
+}
+
+fn parse_scalar_type<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
+    // https://spec.graphql.org/draft/#sec-Scalars
+    let Token { pos, .. } = required!(p, Name("scalar"), "invalid `scalar` identifier")?;
+    let name = required!(p, Name(_), "invalid scalar name")?;
+    let directives = parse_directives(p)?;
+    let scalar_type = ScalarType {
+        description: None,
+        pos,
+        name: TypeName::from(name),
+        directives,
+    };
+    let def = SchemaTopLevel::TypeDef(TypeDef::Scalar(scalar_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -457,7 +474,12 @@ fn parse_directives<'a>(p: &SchemaParser<'a>) -> Res<Vec<Directive<'a>>> {
     // borrow directives
     // let dir_mut = &mut directives;
     loop {
-        let peeked = p.peek()?;
+        let peeked = match p.peek() {
+            Ok(tok) => tok,
+            // eof means there are no more directives - no reason to error out.
+            Err(SchemaParserError::LexerError(LexerError::EOF)) => return Ok(directives),
+            Err(e) => return Err(e.into()),
+        };
         match peeked.val {
             DirectiveName(_) => {
                 // nextify the peek.
@@ -572,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_object_definition() {
+    fn parses_object_def() {
         let text = "type Thing { name: String }";
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
@@ -606,6 +628,27 @@ mod tests {
             assert_eq!(*arguments, vec![]);
         } else {
             panic!("not object definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_scalar_def() {
+        let text = "scalar Thing";
+        let doc = parse_schema(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        if let SchemaTopLevel::TypeDef(TypeDef::Scalar(ScalarType {
+            pos,
+            description,
+            name,
+            directives,
+        })) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, p(1, 1));
+            assert_eq!(*description, None);
+            assert_eq!(*name, TypeName("Thing"));
+            assert_eq!(*directives, vec![]);
+        } else {
+            panic!("not scalar definition: {:?}", doc.definitions[0]);
         }
     }
 }
