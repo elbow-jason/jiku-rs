@@ -5,7 +5,7 @@ pub trait Parser<'a> {
 
     fn peek(&self) -> Result<Token<'a>, Self::Error>;
     fn next(&self) -> Result<Token<'a>, Self::Error>;
-    // fn check_value(tok: Token<'a>) -> Result<(), Self::Error>;
+    fn peek_prev(&self) -> Option<Token<'a>>;
 
     fn syntax_err<'e>(&self, tok: Token<'e>, message: &'static str) -> Self::Error {
         Self::Error::syntax(tok, message)
@@ -23,6 +23,14 @@ pub trait Parser<'a> {
         Self::Error::float(tok)
     }
 
+    fn unexpected_eof_err<'e>(
+        &self,
+        prev_tok: Option<Token<'e>>,
+        message: &'static str,
+    ) -> Self::Error {
+        Self::Error::unexpected_eof(prev_tok, message)
+    }
+
     fn is_eof_err<'e>(&self, err: &Self::Error) -> bool {
         err.is_eof()
     }
@@ -31,6 +39,7 @@ pub trait Parser<'a> {
 pub trait ParserError {
     fn syntax<'a>(tok: Token<'a>, message: &'static str) -> Self;
     fn already_exists<'a>(tok: Token<'a>, message: &'static str) -> Self;
+    fn unexpected_eof<'a>(prev_tok: Option<Token<'a>>, message: &'static str) -> Self;
     fn int<'a>(tok: Token<'a>) -> Self;
     fn float<'a>(tok: Token<'a>) -> Self;
     fn is_eof(&self) -> bool;
@@ -42,7 +51,13 @@ macro_rules! required {
         match $p.next() {
             ok_tok @ Ok($crate::Token { val: $val, .. }) => ok_tok,
             Ok(tok) => Err($p.syntax_err(tok, $message)),
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                if $p.is_eof_err(&e) {
+                    Err($p.unexpected_eof_err($p.peek_prev(), $message))
+                } else {
+                    Err(e.into())
+                }
+            }
         }
     }};
 }
@@ -66,4 +81,11 @@ macro_rules! optional {
             }
         }
     }};
+}
+
+pub trait SourceCode<'a>: Sized {
+    type P: Parser<'a>;
+    type Error;
+
+    fn parse(&self) -> Result<Self, Self::Error>;
 }

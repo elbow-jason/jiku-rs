@@ -6,7 +6,7 @@ use super::traits::{Parser, ParserError};
 use crate::{optional, required};
 use crate::{
     Argument, Description, Directive, DirectiveName as DirName, EnumValue, EnumValueName,
-    FieldName, Float64, Token, TokenValue, Value, VariableName as VarName,
+    FieldName, Float64, StringValue, Token, TokenValue, Value, VariableName as VarName,
 };
 use TokenValue::*;
 
@@ -52,7 +52,7 @@ pub fn parse_arguments<'a, P: Parser<'a>>(p: &P) -> Result<Vec<Argument<'a>>, P:
 pub fn parse_value<'a, P: Parser<'a>>(p: &P) -> Result<Value<'a>, P::Error> {
     let tok = p.next()?;
     let val = match tok.val {
-        StringLit(s) => Value::String(s),
+        StringLit(s) => Value::String(StringValue::String(s)),
         BlockStringLit(s) => Value::BlockString(s),
         NumberLit(s) => parse_number::<P>(s, tok)?,
         Name("true") => Value::Boolean(true),
@@ -129,9 +129,19 @@ pub fn parse_description<'a, P: Parser<'a>>(p: &P) -> Option<Description<'a>> {
     match p.peek() {
         Err(_) => None,
         Ok(tok) => match &tok.val {
-            StringLit(_) | BlockStringLit(_) => {
+            StringLit(s) => {
                 _ = p.next();
-                Some(Description { tok })
+                Some(Description {
+                    pos: tok.pos,
+                    value: StringValue::String(s),
+                })
+            }
+            BlockStringLit(s) => {
+                _ = p.next();
+                Some(Description {
+                    pos: tok.pos,
+                    value: StringValue::BlockString(s),
+                })
             }
             _ => None,
         },

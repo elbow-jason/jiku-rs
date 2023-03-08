@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use crate::DirectiveLocation;
 #[allow(unused_imports)]
 // TODO: add context to parser for tracking/limiting parsing depth.
@@ -50,7 +52,7 @@ pub enum SchemaParserError {
         message: &'static str,
     },
 
-    #[error("syntax error: {value:?} {pos:?}")]
+    #[error("syntax error: {value:?} {pos:?} {message:?}")]
     SyntaxError {
         value: TokenValue<String>,
         pos: Pos,
@@ -66,7 +68,14 @@ pub enum SchemaParserError {
     #[error("variables are not allowed in schema docs: {value:?} {pos:?}")]
     VariablesNotAllowed { value: TokenValue<String>, pos: Pos },
 
-    #[error("parser reached eof")]
+    #[error("parser reached eof unexpectedly - {prev_value:?}  {prev_pos:?} {message:?}")]
+    UnexpectedEOF {
+        prev_value: Option<TokenValue<String>>,
+        prev_pos: Option<Pos>,
+        message: &'static str,
+    },
+
+    #[error("parser successfully reached eof")]
     EOF,
 }
 
@@ -104,6 +113,14 @@ impl ParserError for SchemaParserError {
     fn is_eof(&self) -> bool {
         self == &SchemaParserError::EOF
     }
+
+    fn unexpected_eof<'a>(prev_tok: Option<Token<'a>>, message: &'static str) -> SchemaParserError {
+        SchemaParserError::UnexpectedEOF {
+            prev_value: prev_tok.map(|t| t.val.to_owned()),
+            prev_pos: prev_tok.map(|t| t.pos),
+            message,
+        }
+    }
 }
 
 type Error = SchemaParserError;
@@ -114,11 +131,25 @@ type Res<T> = std::result::Result<T, Error>;
 pub(crate) struct SchemaParser<'a> {
     lexer: Lexer<'a>,
     config: ParserConfig,
+    prev_token: Cell<Option<Token<'a>>>,
 }
+
+// SchemaParser can be sent across threads
+unsafe impl<'a> Send for SchemaParser<'a> {}
+
+// SchemaParser can be synchronized. There is no synchronization mechanism in place
+// and since we can/do pass it be reference (always &self and never &mut self) one
+// might be tempted to attempt parallelizing parsing. Parallelizing would not cause UB,
+// but it would (almost certainly) would lead to unpredictably invalid results.
+impl<'a> !Sync for SchemaParser<'a> {}
 
 impl<'a> SchemaParser<'a> {
     fn new(lexer: Lexer<'a>, config: ParserConfig) -> SchemaParser<'a> {
-        SchemaParser { lexer, config }
+        SchemaParser {
+            lexer,
+            config,
+            prev_token: Cell::new(None),
+        }
     }
 }
 
@@ -132,7 +163,11 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
 
             match token.val {
                 Space | Tab | Newline | Comma => continue,
-                _ => return Ok(check_no_variables(token)?),
+                _ => {
+                    let token = check_no_variables(token)?;
+                    _ = self.prev_token.replace(Some(token));
+                    return Ok(token);
+                }
             }
         }
     }
@@ -151,6 +186,10 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
                 _ => return Ok(check_no_variables(token)?),
             }
         }
+    }
+
+    fn peek_prev(&self) -> Option<Token<'a>> {
+        self.prev_token.get()
     }
 }
 
@@ -277,7 +316,6 @@ fn parse_directive_def<'a>(
     doc: &mut SchemaDoc<'a>,
     mut ctx: Context<'a>,
 ) -> Res<()> {
-    dbg!("here");
     let description = ctx.description.take();
     let Token { pos, .. } = required!(p, Name("directive"), "invalid `directive` keyword")?;
     let name = required!(p, DirectiveName(_), "invalid directive definition name")?;
@@ -287,11 +325,9 @@ fn parse_directive_def<'a>(
     } else {
         vec![]
     };
-    dbg!("here");
     let repeatable = optional!(p, Name("repeatable"))?.is_some();
     let on = required!(p, Name("on"), "expected `on` in directive definition")?;
     let locations = parse_directive_locations(p, on)?;
-    dbg!("here");
     let directive_def = DirectiveDef {
         description,
         name: DirName::from(name),
@@ -300,9 +336,8 @@ fn parse_directive_def<'a>(
         arguments,
         locations,
     };
-    dbg!("here");
-    doc.definitions
-        .push(Definition::DirectiveDef(directive_def));
+    let def = Definition::DirectiveDef(directive_def);
+    doc.definitions.push(def);
     Ok(())
 }
 
@@ -321,7 +356,6 @@ fn parse_directive_locations<'a>(
         match DirectiveLocation::from_str(location_tok.as_str()) {
             Some(location) => {
                 locations.push(location);
-                dbg!("here");
                 continue;
             }
             None => break,
@@ -393,9 +427,8 @@ fn parse_input_object_type<'a>(
     let type_name = TypeName::from(name);
     ctx.type_name = Some(type_name);
     let directives = values::parse_directives(p)?;
-    let _ = required!(p, OpenCurly, "input object fields block did not open")?;
+    _ = required!(p, OpenCurly, "expected input object opening curly bracket")?;
     let fields = parse_input_value_defs(p, CloseCurly, "invalid input object field")?;
-    let _ = required!(p, CloseCurly, "input object fields block did close")?;
     let input_object_type = InputObjectType {
         pos,
         description,
@@ -439,6 +472,7 @@ fn parse_input_value_defs<'a>(
     loop {
         let tok = p.peek()?;
         if tok.val == closer {
+            _ = p.next();
             return Ok(fields);
         }
         match tok.val {
@@ -837,7 +871,10 @@ mod tests {
             assert_eq!(*name, FieldName("name"));
             assert_eq!(directives.len(), 0);
             assert_eq!(*ty, Type::Name(TypeName("String")));
-            assert_eq!(*default_value, Some(Value::String("\"blep\"")));
+            assert_eq!(
+                default_value.as_ref().unwrap(),
+                &Value::String(StringValue::String("\"blep\""))
+            );
         } else {
             panic!("not input object definition: {:?}", doc.definitions[0]);
         }
@@ -990,10 +1027,10 @@ mod tests {
             assert_eq!(values.len(), 2);
             let value = &values[0];
             assert_eq!(
-                value.description.unwrap().tok.val,
-                StringLit("\"it's good\"")
+                value.description.unwrap().value,
+                StringValue::String("\"it's good\"")
             );
-            assert_eq!(value.description.unwrap().tok.pos, p(3, 13));
+            assert_eq!(value.description.unwrap().pos, p(3, 13));
             assert_eq!(value.name, EnumValueName("GOOD"));
             assert_eq!(value.pos, p(4, 13));
             assert_eq!(value.directives.len(), 0);
@@ -1074,7 +1111,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_simple_directives_def() {
+    fn parses_simple_directive_def() {
         let simple = r#"
         directive @foo on FIELD
         "#;
@@ -1096,7 +1133,48 @@ mod tests {
             assert_eq!(*locations, vec![DirectiveLocation::Field]);
             assert_eq!(*repeatable, false);
         } else {
-            todo!()
+            panic!("not directive definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_full_directive_def() {
+        let text = r#"
+        """
+        Some description
+        """
+        directive @foo(arg: Int) repeatable on FIELD | FIELD_DEFINITION | SUBSCRIPTION
+        "#;
+        let doc = parse_schema(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        if let Definition::DirectiveDef(DirectiveDef {
+            pos,
+            description,
+            name,
+            arguments,
+            locations,
+            repeatable,
+        }) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, p(4, 9));
+            assert_eq!(description.unwrap().pos, p(1, 1));
+            assert_eq!(
+                description.unwrap().value,
+                StringValue::BlockString("\"\"\"\n        Some description\n        \"\"\"")
+            );
+            assert_eq!(*name, DirName("@foo"));
+            assert_eq!(arguments.len(), 1);
+            assert_eq!(
+                *locations,
+                vec![
+                    DirectiveLocation::Field,
+                    DirectiveLocation::FieldDefinition,
+                    DirectiveLocation::Subscription
+                ]
+            );
+            assert_eq!(*repeatable, true);
+        } else {
+            panic!("not directive definition: {:?}", doc.definitions[0]);
         }
     }
 }

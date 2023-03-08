@@ -34,6 +34,10 @@ impl Default for Pos {
     }
 }
 
+trait Position<'a> {
+    fn position(&self) -> Pos;
+}
+
 #[inline(always)]
 fn char_starts_name(c: char) -> bool {
     c == '_' || c.is_alphabetic()

@@ -28,13 +28,28 @@ pub enum Value<'a> {
     Variable(VariableName<'a>),
     Int(Int),
     Float(Float64),
-    String(&'a str),
+    String(StringValue<'a>),
     BlockString(&'a str),
     Boolean(bool),
     Null,
     Enum(EnumValueName<'a>),
     List(Vec<Value<'a>>),
     Object(Map<'a>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StringValue<'a> {
+    String(&'a str),
+    BlockString(&'a str),
+}
+
+impl<'a> StringValue<'a> {
+    pub fn as_str(&self) -> &'a str {
+        match self {
+            StringValue::String(s) => s,
+            StringValue::BlockString(s) => s,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

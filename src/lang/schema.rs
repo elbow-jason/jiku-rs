@@ -1,16 +1,21 @@
 use crate::{
     Directive, DirectiveLocation, DirectiveName, EnumValueName, FieldName, InterfaceName, Pos,
-    Token, Type, TypeName, Value,
+    StringValue, Type, TypeName, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Description<'a> {
-    pub tok: Token<'a>,
+    pub pos: Pos,
+    pub value: StringValue<'a>,
 }
 
 impl<'a> Description<'a> {
     pub fn as_str(&'a self) -> &'a str {
-        self.tok.as_str()
+        self.value.as_str()
+    }
+
+    pub fn pos(&self) -> Pos {
+        self.pos
     }
 }
 
