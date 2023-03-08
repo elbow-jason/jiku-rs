@@ -50,6 +50,11 @@ pub enum Extension<'a> {
 pub struct TypeExt<'a> {
     pub pos: Pos,
     pub description: Option<Description<'a>>,
+    // some of the typedef structs are capable of
+    // representing states that type extensions do not represent.
+    // is this a concern?
+    // Yes. Don't be lazy. Just type them out. No.
+    // TODO: make invalid states impossible for TypeExt.
     pub type_def: TypeDef<'a>,
 }
 
