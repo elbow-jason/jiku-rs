@@ -1,11 +1,12 @@
+use crate::DirectiveLocation;
 #[allow(unused_imports)]
 // TODO: add context to parser for tracking/limiting parsing depth.
 //
 use crate::{
-    optional, required, Argument, DefaultValue, Definition, Description, Directive, DirectiveName,
-    EnumType, EnumValue, EnumValueName, FieldDef, FieldName, Float64, InputObjectType,
-    InputValueDef, InterfaceType, Lexer, ObjectType, Pos, ScalarType, SchemaDef, SchemaDoc, Token,
-    TokenValue, Type, TypeDef, TypeName, UnionType, Value,
+    optional, required, Argument, DefaultValue, Definition, Description, Directive, DirectiveDef,
+    DirectiveName as DirName, EnumType, EnumValue, EnumValueName, FieldDef, FieldName, Float64,
+    InputObjectType, InputValueDef, InterfaceName, InterfaceType, Lexer, ObjectType, Pos,
+    ScalarType, SchemaDef, SchemaDoc, Token, TokenValue, Type, TypeDef, TypeName, UnionType, Value,
 };
 
 use super::traits::{Parser, ParserError};
@@ -13,18 +14,6 @@ use super::values;
 
 use thiserror::Error as ThisError;
 use TokenValue::*;
-
-// macro_rules! req {
-//     ($p:expr, $val:pat, $message:expr) => {
-//         required!($p, $val, $message)
-//     };
-// }
-
-// macro_rules! opt {
-//     ($p:expr, $val:pat) => {
-//         optional!($p, $val, SchemaParserError)
-//     };
-// }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParserConfig {
@@ -227,6 +216,7 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
     };
 
     match top_level.val {
+        Name("directive") => parse_directive_def(p, doc, ctx),
         Name("schema") => parse_schema_def(p, doc, ctx),
         Name("input") => parse_input_object_type(p, doc, ctx),
         Name("type") => parse_object_type(p, doc, ctx),
@@ -264,6 +254,7 @@ fn parse_object_type<'a>(
     let Token { pos, .. } = required!(p, Name("type"), "invalid `type` identifier")?;
     let name = required!(p, Name(_), "invalid object name")?;
     ctx.type_name = Some(TypeName::from(name));
+    let interfaces = parse_interfaces(p)?;
     let directives = values::parse_directives(p)?;
     let _ = required!(p, OpenCurly, "object fields block did not open")?;
     let fields = parse_field_defs(p)?;
@@ -274,11 +265,91 @@ fn parse_object_type<'a>(
         name: TypeName::from(name),
         directives,
         fields,
-        interfaces: vec![],
+        interfaces,
     };
     let def = Definition::TypeDef(TypeDef::Object(object_type));
     doc.definitions.push(def);
     Ok(())
+}
+
+fn parse_directive_def<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    mut ctx: Context<'a>,
+) -> Res<()> {
+    dbg!("here");
+    let description = ctx.description.take();
+    let Token { pos, .. } = required!(p, Name("directive"), "invalid `directive` keyword")?;
+    let name = required!(p, DirectiveName(_), "invalid directive definition name")?;
+    let open_paren = optional!(p, OpenParen)?;
+    let arguments = if open_paren.is_some() {
+        parse_input_value_defs(p, CloseParen, "invalid directive definition argument")?
+    } else {
+        vec![]
+    };
+    dbg!("here");
+    let repeatable = optional!(p, Name("repeatable"))?.is_some();
+    let on = required!(p, Name("on"), "expected `on` in directive definition")?;
+    let locations = parse_directive_locations(p, on)?;
+    dbg!("here");
+    let directive_def = DirectiveDef {
+        description,
+        name: DirName::from(name),
+        repeatable,
+        pos,
+        arguments,
+        locations,
+    };
+    dbg!("here");
+    doc.definitions
+        .push(Definition::DirectiveDef(directive_def));
+    Ok(())
+}
+
+fn parse_directive_locations<'a>(
+    p: &SchemaParser<'a>,
+    on: Token<'a>,
+) -> Res<Vec<DirectiveLocation>> {
+    let mut locations = Vec::new();
+    loop {
+        let _pipe = optional!(p, Pipe)?;
+        let location_tok = optional!(p, Name(_))?;
+        if location_tok.is_none() {
+            break;
+        }
+        let location_tok = location_tok.unwrap();
+        match DirectiveLocation::from_str(location_tok.as_str()) {
+            Some(location) => locations.push(location),
+            None => break,
+        }
+    }
+    if locations.is_empty() {
+        return Err(Error::syntax(
+            on,
+            "expected at least one directive location after `on`",
+        ));
+    }
+    Ok(locations)
+}
+
+fn parse_interfaces<'a>(p: &SchemaParser<'a>) -> Res<Vec<InterfaceName<'a>>> {
+    let implements = optional!(p, Name("implements"))?;
+    if implements.is_none() {
+        return Ok(vec![]);
+    }
+    let mut interfaces = Vec::new();
+    loop {
+        let _ = optional!(p, Ampersand)?;
+        let name = p.peek()?;
+        match &name.val {
+            Name(_) => {
+                _ = p.next();
+                interfaces.push(InterfaceName::from(name));
+                continue;
+            }
+            _ => return Ok(interfaces),
+        }
+    }
 }
 
 fn parse_interface_type<'a>(
@@ -740,7 +811,7 @@ mod tests {
             assert_eq!(
                 *directives,
                 vec![Directive {
-                    name: DirectiveName("@thingDir"),
+                    name: DirName("@thingDir"),
                     arguments: vec![Argument {
                         name: FieldName("asd"),
                         value: Value::Int(Int(456))
@@ -772,7 +843,9 @@ mod tests {
     fn parses_object_def() {
         let text = r#"
         "some desc"
-        type Thing { name: String }
+        type Thing implements Other {
+            name: String
+        }
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
@@ -789,7 +862,7 @@ mod tests {
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
-            assert_eq!(*interfaces, vec![]);
+            assert_eq!(*interfaces, vec![InterfaceName("Other")]);
             assert_eq!(fields.len(), 1);
             let FieldDef {
                 pos,
@@ -799,7 +872,7 @@ mod tests {
                 ty,
                 arguments,
             } = &fields[0];
-            assert_eq!(*pos, p(2, 22));
+            assert_eq!(*pos, p(3, 13));
             assert_eq!(*description, None);
             assert_eq!(*name, FieldName("name"));
             assert_eq!(directives.len(), 0);
@@ -832,7 +905,7 @@ mod tests {
                 *directives,
                 vec![Directive {
                     location: None,
-                    name: DirectiveName("@someDir"),
+                    name: DirName("@someDir"),
                     arguments: vec![Argument {
                         name: FieldName("asd"),
                         value: Value::Enum(EnumValueName("BLEP"))
@@ -993,6 +1066,33 @@ mod tests {
             assert_eq!(*ty, TypeName("Other"));
         } else {
             panic!("not union definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_simple_directives_def() {
+        let simple = r#"
+        directive @foo on FIELD
+        "#;
+        let doc = parse_schema(simple).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        if let Definition::DirectiveDef(DirectiveDef {
+            pos,
+            description,
+            name,
+            arguments,
+            locations,
+            repeatable,
+        }) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*description, None);
+            assert_eq!(*name, DirName("@foo"));
+            assert_eq!(arguments.len(), 0);
+            assert_eq!(*locations, vec![DirectiveLocation::Field]);
+            assert_eq!(*repeatable, true);
+        } else {
+            todo!()
         }
     }
 }

@@ -7,7 +7,7 @@ pub struct Directive<'a> {
     pub location: Option<DirectiveLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DirectiveLocation {
     // schema locations
     ArgumentDefinition,

@@ -1,6 +1,6 @@
 use crate::{
-    Directive, DirectiveName, EnumValueName, FieldName, InterfaceName, Pos, Token, Type, TypeName,
-    Value,
+    Directive, DirectiveLocation, DirectiveName, EnumValueName, FieldName, InterfaceName, Pos,
+    Token, Type, TypeName, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -35,10 +35,14 @@ pub enum Definition<'a> {
     DirectiveDef(DirectiveDef<'a>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DirectiveDef<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
     pub name: DirectiveName<'a>,
-    // pub arguments: Vec<Argument<'a>>,
+    pub arguments: Vec<InputValueDef<'a>>,
+    pub repeatable: bool,
+    pub locations: Vec<DirectiveLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
