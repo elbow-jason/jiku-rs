@@ -54,3 +54,22 @@ pub enum Type<'a> {
     List(Box<Type<'a>>),
     NonNull(Box<Type<'a>>),
 }
+
+// a stub
+pub struct SchemaTypes<'a> {
+    types: Vec<TypeName<'a>>,
+}
+
+impl<'a> Type<'a> {
+    // https://spec.graphql.org/October2021/#sec-Types
+
+    fn is_input_type(&self, _types: &SchemaTypes<'a>) -> bool {
+        // lookup the type in the schema types
+        todo!()
+    }
+
+    fn is_output_type(&self, _types: &SchemaTypes<'a>) -> bool {
+        // lookup the type in the schema types
+        todo!()
+    }
+}
