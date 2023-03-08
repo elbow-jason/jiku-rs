@@ -36,8 +36,28 @@ impl<'a> SchemaDoc<'a> {
 pub enum Definition<'a> {
     SchemaDef(SchemaDef<'a>),
     TypeDef(TypeDef<'a>),
-    TypeExt(TypeExt<'a>),
+    Extension(Extension<'a>),
     DirectiveDef(DirectiveDef<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Extension<'a> {
+    TypeExt(TypeExt<'a>),
+    SchemaExt(SchemaExt<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeExt<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub type_def: TypeDef<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaExt<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub schema_def: SchemaDef<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -113,11 +133,6 @@ pub struct ObjectType<'a> {
     pub interfaces: Vec<InterfaceName<'a>>,
     pub directives: Vec<Directive<'a>>,
     pub fields: Vec<FieldDef<'a>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeExt<'a> {
-    pub name: TypeName<'a>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

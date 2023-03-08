@@ -6,9 +6,10 @@ use crate::DirectiveLocation;
 //
 use crate::{
     optional, required, Argument, DefaultValue, Definition, Description, Directive, DirectiveDef,
-    DirectiveName as DirName, EnumType, EnumValue, EnumValueName, FieldDef, FieldName, Float64,
-    InputObjectType, InputValueDef, InterfaceName, InterfaceType, Lexer, ObjectType, Pos,
-    ScalarType, SchemaDef, SchemaDoc, Token, TokenValue, Type, TypeDef, TypeName, UnionType, Value,
+    DirectiveName as DirName, EnumType, EnumValue, EnumValueName, Extension, FieldDef, FieldName,
+    Float64, InputObjectType, InputValueDef, InterfaceName, InterfaceType, Lexer, ObjectType, Pos,
+    ScalarType, SchemaDef, SchemaDoc, SchemaExt, Token, TokenValue, Type, TypeDef, TypeExt,
+    TypeName, UnionType, Value,
 };
 
 use super::traits::{Parser, ParserError};
@@ -247,14 +248,24 @@ struct Context<'a> {
 
 fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
     let description = values::parse_description(p);
-    let top_level = p.peek()?;
+
     let ctx = Context {
         description,
         type_name: None,
         field_name: None,
     };
+    let top_level = p.peek()?;
+    _parse_top_level_once_with_context(p, doc, ctx, top_level)
+}
 
+fn _parse_top_level_once_with_context<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    ctx: Context<'a>,
+    top_level: Token<'a>,
+) -> Res<()> {
     match top_level.val {
+        Name("extend") => parse_extension(p, doc, ctx),
         Name("directive") => parse_directive_def(p, doc, ctx),
         Name("schema") => parse_schema_def(p, doc, ctx),
         Name("input") => parse_input_object_type(p, doc, ctx),
@@ -270,6 +281,68 @@ fn _parse_top_level_once<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> R
         }
     }
 }
+
+fn parse_extension<'a>(
+    p: &SchemaParser<'a>,
+    doc: &mut SchemaDoc<'a>,
+    mut ctx: Context<'a>,
+) -> Res<()> {
+    let description = ctx.description.take();
+    let extend_keyword = required!(p, Name("extend"), "expected keyword `extend`")?;
+    let Token { pos, .. } = extend_keyword;
+    let extend_again = optional!(p, Name("extend"))?;
+    if extend_again.is_some() {
+        // prevent `extend extend` which would be possible without this check.
+        return Err(SchemaParserError::syntax(
+            extend_again.unwrap(),
+            "keyword `extend` appears twice in a row",
+        ));
+    }
+    let mut fake_doc = SchemaDoc {
+        definitions: vec![],
+    };
+    let peeked = p.peek()?;
+    let () = _parse_top_level_once_with_context(p, &mut fake_doc, ctx, peeked)?;
+    match fake_doc.definitions.len() {
+        1 => match fake_doc.definitions.pop().unwrap() {
+            Definition::TypeDef(type_def) => {
+                let type_ext = TypeExt {
+                    pos,
+                    description,
+                    type_def,
+                };
+                let def = Definition::Extension(Extension::TypeExt(type_ext));
+                doc.definitions.push(def);
+                Ok(())
+            }
+            Definition::SchemaDef(schema_def) => {
+                let schema_ext = SchemaExt {
+                    pos,
+                    description,
+                    schema_def,
+                };
+                let def = Definition::Extension(Extension::SchemaExt(schema_ext));
+                doc.definitions.push(def);
+                Ok(())
+            }
+
+            _ => {
+                return Err(SchemaParserError::syntax(
+                    extend_keyword,
+                    "invalid type extension",
+                ))
+            }
+        },
+        _ => Err(SchemaParserError::syntax(
+            extend_keyword,
+            "expected exactly one extension",
+        )),
+    }
+}
+
+// let extend = p.peek()?;
+// if extend.val!= Name("extend") {
+//     return Err(SchemaParserError::syntax(
 
 fn replace_none_token<'a>(
     mut slot: Option<Token<'a>>,
@@ -1176,5 +1249,99 @@ mod tests {
         } else {
             panic!("not directive definition: {:?}", doc.definitions[0]);
         }
+    }
+
+    #[test]
+    fn parses_type_extension() {
+        let text = r#"
+        "some desc"
+        extend type Thing { name: String }
+        "#;
+        let doc = parse_schema(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        let type_def = if let Definition::Extension(Extension::TypeExt(TypeExt {
+            pos,
+            description,
+            type_def,
+        })) = &doc.definitions[0]
+        {
+            // pos here is actually 2, 1, but rust is including the whitespace in this test.
+            assert_eq!(*pos, p(2, 9));
+            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
+            type_def
+        } else {
+            panic!("not extension: {:?}", doc.definitions[0]);
+        };
+        if let TypeDef::Object(ObjectType {
+            pos,
+            description,
+            name,
+            directives,
+            fields,
+            interfaces,
+        }) = type_def
+        {
+            assert_eq!(*pos, p(2, 16));
+            assert_eq!(*description, None);
+            assert_eq!(*name, TypeName("Thing"));
+            assert_eq!(*directives, vec![]);
+            assert_eq!(*interfaces, vec![]);
+            assert_eq!(fields.len(), 1);
+            let FieldDef {
+                pos,
+                description,
+                name,
+                directives,
+                ty,
+                arguments,
+            } = &fields[0];
+            assert_eq!(*pos, p(2, 29));
+            assert_eq!(*description, None);
+            assert_eq!(*name, FieldName("name"));
+            assert_eq!(directives.len(), 0);
+            assert_eq!(*ty, Type::Name(TypeName("String")));
+            assert_eq!(*arguments, vec![]);
+        } else {
+            panic!("not object definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_schema_extension() {
+        let text = r#"
+        "some desc"
+        extend schema { query: MyQ }
+        "#;
+        let doc = parse_schema(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+        let schema_def = if let Definition::Extension(Extension::SchemaExt(SchemaExt {
+            pos,
+            description,
+            schema_def,
+        })) = &doc.definitions[0]
+        {
+            // pos here is actually 2, 1, but rust is including the whitespace in this test.
+            assert_eq!(*pos, p(2, 9));
+            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
+            schema_def
+        } else {
+            panic!("not extension: {:?}", doc.definitions[0]);
+        };
+
+        let SchemaDef {
+            pos,
+            query,
+            mutation,
+            subscription,
+            directives,
+            description,
+        } = schema_def;
+
+        assert_eq!(*pos, p(2, 16));
+        assert_eq!(directives.len(), 0);
+        assert_eq!(*query, Some(TypeName("MyQ")));
+        assert_eq!(*mutation, None);
+        assert_eq!(*subscription, None);
+        assert_eq!(*description, None);
     }
 }
