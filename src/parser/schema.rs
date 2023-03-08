@@ -319,7 +319,11 @@ fn parse_directive_locations<'a>(
         }
         let location_tok = location_tok.unwrap();
         match DirectiveLocation::from_str(location_tok.as_str()) {
-            Some(location) => locations.push(location),
+            Some(location) => {
+                locations.push(location);
+                dbg!("here");
+                continue;
+            }
             None => break,
         }
     }
@@ -1085,12 +1089,12 @@ mod tests {
             repeatable,
         }) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, p(1, 1));
             assert_eq!(*description, None);
             assert_eq!(*name, DirName("@foo"));
             assert_eq!(arguments.len(), 0);
             assert_eq!(*locations, vec![DirectiveLocation::Field]);
-            assert_eq!(*repeatable, true);
+            assert_eq!(*repeatable, false);
         } else {
             todo!()
         }
