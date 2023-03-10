@@ -1,6 +1,6 @@
 use crate::{
-    Directive, DirectiveLocation, DirectiveName, EnumValueName, FieldName, InterfaceName, Pos,
-    StringValue, Type, TypeName, Value,
+    Directive, DirectiveLocation, DirectiveName, EnumValueName, FieldName, FieldType,
+    InterfaceName, Pos, StringValue, TypeName, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -154,9 +154,9 @@ pub struct SchemaDef<'a> {
 pub struct FieldDef<'a> {
     pub pos: Pos,
     pub description: Option<Description<'a>>,
-    pub name: FieldName<'a>,
+    pub field_name: FieldName<'a>,
     pub arguments: Vec<InputValueDef<'a>>,
-    pub ty: Type<'a>,
+    pub field_type: FieldType<'a>,
     pub directives: Vec<Directive<'a>>,
 }
 
@@ -173,8 +173,8 @@ pub struct InputObjectType<'a> {
 pub struct InputValueDef<'a> {
     pub pos: Pos,
     pub description: Option<Description<'a>>,
-    pub name: FieldName<'a>,
-    pub ty: Type<'a>,
+    pub field_name: FieldName<'a>,
+    pub field_type: FieldType<'a>,
     pub default_value: Option<Value<'a>>,
     pub directives: Vec<Directive<'a>>,
 }

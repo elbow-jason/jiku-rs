@@ -1,131 +1,25 @@
-use std::cell::Cell;
-
-use crate::DirectiveLocation;
 #[allow(unused_imports)]
 // TODO: add context to parser for tracking/limiting parsing depth.
 //
+use super::ParserConfig;
+use crate::DirectiveLocation;
 use crate::{
-    optional, required, Argument, DefaultValue, Definition, Description, Directive, DirectiveDef,
-    DirectiveName as DirName, EnumType, EnumValue, EnumValueName, Extension, FieldDef, FieldName,
-    Float64, InputObjectType, InputValueDef, InterfaceName, InterfaceType, Lexer, ObjectType, Pos,
-    ScalarType, SchemaDef, SchemaDoc, SchemaExt, Token, TokenValue, Type, TypeDef, TypeExt,
-    TypeName, UnionType, Value,
+    optional, required, Definition, Description, DirectiveDef, DirectiveName as DirName, EnumType,
+    Extension, FieldDef, FieldName, InputObjectType, InputValueDef, InterfaceName, InterfaceType,
+    Lexer, ObjectType, ScalarType, SchemaDef, SchemaDoc, SchemaExt, Token, TokenValue, TypeDef,
+    TypeExt, TypeName, UnionType,
 };
 
-use super::traits::{Parser, ParserError};
+use std::cell::Cell;
+// use crate::{Argument, DefaultValue, Directive, EnumValue, EnumValueName, Float64, Pos, Value};
+
+use super::error::ParserError;
+use super::traits::Parser;
 use super::values;
 
-use thiserror::Error as ThisError;
 use TokenValue::*;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ParserConfig {
-    pub indent: u32,
-    pub text_size_limit: usize,
-}
-
-impl Default for ParserConfig {
-    fn default() -> Self {
-        ParserConfig {
-            indent: 4,
-            // TODO: use this to provide a little bit of safety.
-            text_size_limit: 16_000_000,
-        }
-    }
-}
-
-#[derive(ThisError, Debug, Clone, PartialEq, Eq)]
-pub enum SchemaParserError {
-    #[error("schema text size limit exceeded - limit: {limit:?}, text_size: {text_size:?}")]
-    TextSizeLimitExceeded { limit: usize, text_size: usize },
-
-    #[error("unexpected token: {value:?} {pos:?} {message:?}")]
-    UnexpectedToken {
-        value: TokenValue<String>,
-        pos: Pos,
-        message: &'static str,
-    },
-
-    #[error("token already exists: {value:?} {pos:?}: {message:?}")]
-    AlreadyExists {
-        value: TokenValue<String>,
-        pos: Pos,
-        message: &'static str,
-    },
-
-    #[error("syntax error: {value:?} {pos:?} {message:?}")]
-    SyntaxError {
-        value: TokenValue<String>,
-        pos: Pos,
-        message: &'static str,
-    },
-
-    #[error("invalid float value: {value:?} {pos:?}")]
-    ParseFloatError { value: TokenValue<String>, pos: Pos },
-
-    #[error("invalid int value: {value:?} {pos:?}")]
-    ParseIntError { value: TokenValue<String>, pos: Pos },
-
-    #[error("variables are not allowed in schema docs: {value:?} {pos:?}")]
-    VariablesNotAllowed { value: TokenValue<String>, pos: Pos },
-
-    #[error("parser reached eof unexpectedly - {prev_value:?}  {prev_pos:?} {message:?}")]
-    UnexpectedEOF {
-        prev_value: Option<TokenValue<String>>,
-        prev_pos: Option<Pos>,
-        message: &'static str,
-    },
-
-    #[error("parser successfully reached eof")]
-    EOF,
-}
-
-impl ParserError for SchemaParserError {
-    fn syntax<'a>(token: Token<'a>, message: &'static str) -> SchemaParserError {
-        SchemaParserError::SyntaxError {
-            value: token.val.to_owned(),
-            pos: token.pos,
-            message,
-        }
-    }
-
-    fn already_exists<'a>(token: Token<'a>, message: &'static str) -> SchemaParserError {
-        SchemaParserError::AlreadyExists {
-            value: token.val.to_owned(),
-            pos: token.pos,
-            message,
-        }
-    }
-
-    fn int<'a>(tok: Token<'a>) -> SchemaParserError {
-        Self::ParseIntError {
-            value: tok.val.to_owned(),
-            pos: tok.pos,
-        }
-    }
-
-    fn float<'a>(tok: Token<'a>) -> SchemaParserError {
-        Self::ParseFloatError {
-            value: tok.val.to_owned(),
-            pos: tok.pos,
-        }
-    }
-
-    fn is_eof(&self) -> bool {
-        self == &SchemaParserError::EOF
-    }
-
-    fn unexpected_eof<'a>(prev_tok: Option<Token<'a>>, message: &'static str) -> SchemaParserError {
-        SchemaParserError::UnexpectedEOF {
-            prev_value: prev_tok.map(|t| t.val.to_owned()),
-            prev_pos: prev_tok.map(|t| t.pos),
-            message,
-        }
-    }
-}
-
-type Error = SchemaParserError;
-type Res<T> = std::result::Result<T, Error>;
+type Res<T> = std::result::Result<T, ParserError>;
 
 // The context-holding structure for parsing schemas
 #[derive(Clone)]
@@ -155,11 +49,9 @@ impl<'a> SchemaParser<'a> {
 }
 
 impl<'a> Parser<'a> for SchemaParser<'a> {
-    type Error = SchemaParserError;
-
     fn next(&self) -> Res<Token<'a>> {
         loop {
-            let token = self.lexer.next().ok_or(SchemaParserError::EOF)?;
+            let token = self.lexer.next().ok_or(ParserError::EOF)?;
             use TokenValue::*;
 
             match token.val {
@@ -175,7 +67,7 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
 
     fn peek(&self) -> Res<Token<'a>> {
         loop {
-            let token = self.lexer.peek().ok_or(SchemaParserError::EOF)?;
+            let token = self.lexer.peek().ok_or(ParserError::EOF)?;
             use TokenValue::*;
 
             match token.val {
@@ -196,7 +88,7 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
 
 fn check_no_variables<'a>(tok: Token<'a>) -> Res<Token<'a>> {
     match tok.val {
-        VariableName(_) => Err(SchemaParserError::VariablesNotAllowed {
+        VariableName(_) => Err(ParserError::VariablesNotAllowed {
             value: tok.val.to_owned(),
             pos: tok.pos,
         }),
@@ -217,24 +109,11 @@ pub fn parse_schema_with_config<'a>(text: &'a str, config: ParserConfig) -> Res<
 }
 
 fn parse_top_level<'a>(p: &SchemaParser<'a>, doc: &mut SchemaDoc<'a>) -> Res<()> {
-    // We have been handed a parser that is *supposed* to be at the top level.
-    // we need to peek the next token and figure out what to parse next. This
-    // function is the entry point for the work of parsing all definitions in a
-    // schema doc. This function should also be the exit point for successful
-    // parsing; the `None` from the Parser that indicates eof should be
-    // encountered in this scope for validly-structured SDL.
-    //
-    // NOTE: this function and all ast-building parser functions should not use
-    // recursion; we are trying to avoid vulnerability to a stack overflow.
-    // Instead, prefer returning an intermediate builder structure that can be
-    // initialized, built up, and then converted into its well-formed, public
-    // data structure.
-
     loop {
         let res = _parse_top_level_once(p, doc);
         match res {
             Ok(()) => continue,
-            Err(SchemaParserError::EOF) => return Ok(()),
+            Err(ParserError::EOF) => return Ok(()),
             Err(err) => return Err(err),
         }
     }
@@ -277,7 +156,7 @@ fn _parse_top_level_once_with_context<'a>(
 
         _ => {
             let message = "not a top-level schema identifier";
-            return Err(SchemaParserError::syntax(top_level, message));
+            return Err(ParserError::syntax(top_level, message));
         }
     }
 }
@@ -293,7 +172,7 @@ fn parse_extension<'a>(
     let extend_again = optional!(p, Name("extend"))?;
     if extend_again.is_some() {
         // prevent `extend extend` which would be possible without this check.
-        return Err(SchemaParserError::syntax(
+        return Err(ParserError::syntax(
             extend_again.unwrap(),
             "keyword `extend` appears twice in a row",
         ));
@@ -327,13 +206,13 @@ fn parse_extension<'a>(
             }
 
             _ => {
-                return Err(SchemaParserError::syntax(
+                return Err(ParserError::syntax(
                     extend_keyword,
                     "invalid type extension",
                 ))
             }
         },
-        _ => Err(SchemaParserError::syntax(
+        _ => Err(ParserError::syntax(
             extend_keyword,
             "expected exactly one extension",
         )),
@@ -342,7 +221,7 @@ fn parse_extension<'a>(
 
 // let extend = p.peek()?;
 // if extend.val!= Name("extend") {
-//     return Err(SchemaParserError::syntax(
+//     return Err(ParserError::syntax(
 
 fn replace_none_token<'a>(
     mut slot: Option<Token<'a>>,
@@ -350,7 +229,7 @@ fn replace_none_token<'a>(
     message: &'static str,
 ) -> Res<Option<Token<'a>>> {
     if slot.is_some() {
-        return Err(Error::already_exists(tok, message));
+        return Err(ParserError::already_exists(tok, message));
     }
     slot = Some(tok);
     Ok(slot)
@@ -435,7 +314,7 @@ fn parse_directive_locations<'a>(
         }
     }
     if locations.is_empty() {
-        return Err(Error::syntax(
+        return Err(ParserError::syntax(
             on,
             "expected at least one directive location after `on`",
         ));
@@ -555,7 +434,7 @@ fn parse_input_value_defs<'a>(
                 continue;
             }
             _ => {
-                return Err(Error::syntax(tok, message));
+                return Err(ParserError::syntax(tok, message));
             }
         }
     }
@@ -575,7 +454,7 @@ fn parse_field_defs<'a>(p: &SchemaParser<'a>) -> Res<Vec<FieldDef<'a>>> {
             }
             _ => {
                 let message = "invalid field definition";
-                return Err(Error::syntax(tok, message));
+                return Err(ParserError::syntax(tok, message));
             }
         }
     }
@@ -590,13 +469,13 @@ fn parse_input_value_def<'a>(p: &SchemaParser<'a>) -> Res<InputValueDef<'a>> {
         Colon,
         "input object field requires a colon after the field name"
     )?;
-    let ty = parse_type(p)?;
+    let ty = values::parse_field_type(p)?;
     let default_value = values::parse_default_value(p)?;
     let directives = values::parse_directives(p)?;
     let ivd = InputValueDef {
         pos,
-        name: FieldName::from(name),
-        ty,
+        field_name: FieldName::from(name),
+        field_type: ty,
         default_value,
         directives,
         description: None,
@@ -620,45 +499,18 @@ fn parse_field_def<'a>(p: &SchemaParser<'a>) -> Res<FieldDef<'a>> {
         Colon,
         "invalid object field - requires a colon after the field name and args"
     )?;
-    let ty = parse_type(p)?;
+    let ty = values::parse_field_type(p)?;
     let directives = values::parse_directives(p)?;
 
     let ivd = FieldDef {
         pos,
-        name: FieldName::from(name),
+        field_name: FieldName::from(name),
         arguments,
-        ty,
+        field_type: ty,
         directives,
         description: None,
     };
     Ok(ivd)
-}
-
-fn parse_type<'a>(p: &SchemaParser<'a>) -> Res<Type<'a>> {
-    // let mut name: Option<Token<'a>> = None;
-
-    let tok = p.peek()?;
-    let ty = match tok.val {
-        OpenBracket => {
-            _ = p.next()?;
-            let item_type = parse_type(p)?;
-            _ = required!(p, CloseBracket, "list type had no closing bracket")?;
-            Type::List(Box::new(item_type))
-        }
-        Name(_) => {
-            // this name = required! can never fail (we just peeked the name),
-            // but we leave the message in place so we'll get a nice error
-            // message if ever...
-            let name = required!(p, Name(_), "type requires a name").unwrap();
-            Type::Name(TypeName::from(name))
-        }
-        _ => return Err(Error::syntax(tok, "type name")),
-    };
-    let bang = optional!(p, Bang)?;
-    if bang.is_some() {
-        return Ok(Type::NonNull(Box::new(ty)));
-    }
-    Ok(ty)
 }
 
 fn parse_schema_def<'a>(
@@ -724,7 +576,7 @@ fn parse_schema_def<'a>(
                     doc.definitions.push(def);
                     return Ok(());
                 }
-                _ => return Err(Error::syntax(field_tok, "invalid schema definition")),
+                _ => return Err(ParserError::syntax(field_tok, "invalid schema definition")),
             },
             Err(e) => return Err(e.into()),
         }
@@ -809,7 +661,7 @@ fn parse_union_member_types<'a>(
         }
     }
     if members.len() == 0 {
-        return Err(Error::syntax(
+        return Err(ParserError::syntax(
             parent.clone(),
             "union must have at least 1 member",
         ));
@@ -861,7 +713,7 @@ mod tests {
 
         assert_eq!(
             res,
-            Err(SchemaParserError::VariablesNotAllowed {
+            Err(ParserError::VariablesNotAllowed {
                 value: TokenValue::VariableName("$myVar".to_string()),
                 pos: p(1, 20)
             })
@@ -924,7 +776,7 @@ mod tests {
                 vec![Directive {
                     name: DirName("@thingDir"),
                     arguments: vec![Argument {
-                        name: FieldName("asd"),
+                        field_name: FieldName("asd"),
                         value: Value::Int(Int(456))
                     }],
                     location: None
@@ -934,16 +786,16 @@ mod tests {
             let InputValueDef {
                 pos,
                 description,
-                name,
+                field_name,
                 directives,
-                ty,
+                field_type,
                 default_value,
             } = &fields[0];
             assert_eq!(*pos, p(2, 48));
             assert_eq!(*description, None);
-            assert_eq!(*name, FieldName("name"));
+            assert_eq!(*field_name, FieldName("name"));
             assert_eq!(directives.len(), 0);
-            assert_eq!(*ty, Type::Name(TypeName("String")));
+            assert_eq!(*field_type, FieldType::Name(TypeName("String")));
             assert_eq!(
                 default_value.as_ref().unwrap(),
                 &Value::String(StringValue::String("\"blep\""))
@@ -981,17 +833,17 @@ mod tests {
             let FieldDef {
                 pos,
                 description,
-                name,
+                field_name,
                 directives,
-                ty,
+                field_type,
                 arguments,
             } = &fields[0];
             assert_eq!(*pos, p(3, 13));
             assert_eq!(*description, None);
-            assert_eq!(*name, FieldName("name"));
-            assert_eq!(directives.len(), 0);
-            assert_eq!(*ty, Type::Name(TypeName("String")));
+            assert_eq!(*field_name, FieldName("name"));
             assert_eq!(*arguments, vec![]);
+            assert_eq!(*field_type, FieldType::Name(TypeName("String")));
+            assert_eq!(directives.len(), 0);
         } else {
             panic!("not object definition: {:?}", doc.definitions[0]);
         }
@@ -1021,7 +873,7 @@ mod tests {
                     location: None,
                     name: DirName("@someDir"),
                     arguments: vec![Argument {
-                        name: FieldName("asd"),
+                        field_name: FieldName("asd"),
                         value: Value::Enum(EnumValueName("BLEP"))
                     }]
                 }]
@@ -1042,7 +894,7 @@ mod tests {
         let err = res.unwrap_err();
         assert_eq!(
             err,
-            SchemaParserError::SyntaxError {
+            ParserError::SyntaxError {
                 value: TokenValue::NumberLit("12345".to_string()),
                 pos: p(2, 22),
                 message: "invalid field definition"
@@ -1061,7 +913,7 @@ mod tests {
         let err = res.unwrap_err();
         assert_eq!(
             err,
-            SchemaParserError::SyntaxError {
+            ParserError::SyntaxError {
                 value: TokenValue::NumberLit("123".to_string()),
                 pos: p(2, 27),
                 message: "expected argument name"
@@ -1138,16 +990,16 @@ mod tests {
             let FieldDef {
                 pos,
                 description,
-                name,
+                field_name,
                 directives,
-                ty,
+                field_type,
                 arguments,
             } = &fields[0];
             assert_eq!(*pos, p(2, 27));
             assert_eq!(*description, None);
-            assert_eq!(*name, FieldName("name"));
+            assert_eq!(*field_name, FieldName("name"));
             assert_eq!(directives.len(), 0);
-            assert_eq!(*ty, Type::Name(TypeName("String")));
+            assert_eq!(*field_type, FieldType::Name(TypeName("String")));
             assert_eq!(*arguments, vec![]);
         } else {
             panic!("not interface definition: {:?}", doc.definitions[0]);
@@ -1290,16 +1142,16 @@ mod tests {
             let FieldDef {
                 pos,
                 description,
-                name,
+                field_name,
                 directives,
-                ty,
+                field_type,
                 arguments,
             } = &fields[0];
             assert_eq!(*pos, p(2, 29));
             assert_eq!(*description, None);
-            assert_eq!(*name, FieldName("name"));
+            assert_eq!(*field_name, FieldName("name"));
             assert_eq!(directives.len(), 0);
-            assert_eq!(*ty, Type::Name(TypeName("String")));
+            assert_eq!(*field_type, FieldType::Name(TypeName("String")));
             assert_eq!(*arguments, vec![]);
         } else {
             panic!("not object definition: {:?}", doc.definitions[0]);

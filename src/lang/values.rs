@@ -54,7 +54,7 @@ impl<'a> StringValue<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Argument<'a> {
-    pub name: FieldName<'a>,
+    pub field_name: FieldName<'a>,
     pub value: Value<'a>,
 }
 

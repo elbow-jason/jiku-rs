@@ -16,9 +16,10 @@ macro_rules! impl_name_from_token {
 
 impl_name_from_token!(TypeName);
 impl_name_from_token!(EnumValueName);
-impl_name_from_token!(VariableName);
 impl_name_from_token!(FieldName);
 impl_name_from_token!(InterfaceName);
+impl_name_from_token!(OpName);
+impl_name_from_token!(FragmentName);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DirectiveName<'a>(pub &'a str);
@@ -36,8 +37,21 @@ impl<'a> From<Token<'a>> for DirectiveName<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeName<'a>(pub &'a str);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OpName<'a>(pub &'a str);
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VariableName<'a>(pub &'a str);
+
+impl<'a> From<Token<'a>> for VariableName<'a> {
+    fn from(token: Token<'a>) -> Self {
+        let val = match token.val {
+            TokenValue::VariableName(name) => name,
+            _ => unreachable!(),
+        };
+        VariableName(val)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EnumValueName<'a>(pub &'a str);
@@ -48,19 +62,17 @@ pub struct FieldName<'a>(pub &'a str);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InterfaceName<'a>(pub &'a str);
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FragmentName<'a>(pub &'a str);
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum Type<'a> {
+pub enum FieldType<'a> {
     Name(TypeName<'a>),
-    List(Box<Type<'a>>),
-    NonNull(Box<Type<'a>>),
+    List(Box<FieldType<'a>>),
+    NonNull(Box<FieldType<'a>>),
 }
 
-// a stub
-pub struct SchemaTypes<'a> {
-    types: Vec<TypeName<'a>>,
-}
-
-impl<'a> Type<'a> {
+impl<'a> FieldType<'a> {
     // https://spec.graphql.org/October2021/#sec-Types
 
     fn is_input_type(&self, _types: &SchemaTypes<'a>) -> bool {
@@ -72,4 +84,9 @@ impl<'a> Type<'a> {
         // lookup the type in the schema types
         todo!()
     }
+}
+
+// a stub
+pub struct SchemaTypes<'a> {
+    types: Vec<TypeName<'a>>,
 }

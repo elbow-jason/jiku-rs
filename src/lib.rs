@@ -16,7 +16,7 @@ pub use lang::*;
 
 // parser represents the second major step in the parsing process.
 mod error;
-pub use error::Error;
+// pub use error::Error;
 
 mod checker;
 mod parser;

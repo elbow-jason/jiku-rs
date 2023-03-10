@@ -1,49 +1,48 @@
+use super::ParserError;
 use crate::Token;
 
 pub trait Parser<'a> {
-    type Error: ParserError;
-
-    fn peek(&self) -> Result<Token<'a>, Self::Error>;
-    fn next(&self) -> Result<Token<'a>, Self::Error>;
+    fn peek(&self) -> Result<Token<'a>, ParserError>;
+    fn next(&self) -> Result<Token<'a>, ParserError>;
     fn peek_prev(&self) -> Option<Token<'a>>;
 
-    fn syntax_err<'e>(&self, tok: Token<'e>, message: &'static str) -> Self::Error {
-        Self::Error::syntax(tok, message)
+    fn syntax_err<'e>(&self, tok: Token<'e>, message: &'static str) -> ParserError {
+        ParserError::syntax(tok, message)
     }
 
-    fn already_exists_err<'e>(&self, tok: Token<'e>, message: &'static str) -> Self::Error {
-        Self::Error::already_exists(tok, message)
+    fn already_exists_err<'e>(&self, tok: Token<'e>, message: &'static str) -> ParserError {
+        ParserError::already_exists(tok, message)
     }
 
-    fn int_err<'e>(&self, tok: Token<'e>) -> Self::Error {
-        Self::Error::int(tok)
+    fn int_err<'e>(&self, tok: Token<'e>) -> ParserError {
+        ParserError::int(tok)
     }
 
-    fn float_err<'e>(&self, tok: Token<'e>) -> Self::Error {
-        Self::Error::float(tok)
+    fn float_err<'e>(&self, tok: Token<'e>) -> ParserError {
+        ParserError::float(tok)
     }
 
     fn unexpected_eof_err<'e>(
         &self,
         prev_tok: Option<Token<'e>>,
         message: &'static str,
-    ) -> Self::Error {
-        Self::Error::unexpected_eof(prev_tok, message)
+    ) -> ParserError {
+        ParserError::unexpected_eof(prev_tok, message)
     }
 
-    fn is_eof_err<'e>(&self, err: &Self::Error) -> bool {
+    fn is_eof_err<'e>(&self, err: &ParserError) -> bool {
         err.is_eof()
     }
 }
 
-pub trait ParserError {
-    fn syntax<'a>(tok: Token<'a>, message: &'static str) -> Self;
-    fn already_exists<'a>(tok: Token<'a>, message: &'static str) -> Self;
-    fn unexpected_eof<'a>(prev_tok: Option<Token<'a>>, message: &'static str) -> Self;
-    fn int<'a>(tok: Token<'a>) -> Self;
-    fn float<'a>(tok: Token<'a>) -> Self;
-    fn is_eof(&self) -> bool;
-}
+// pub trait ParserError {
+//     fn syntax<'a>(tok: Token<'a>, message: &'static str) -> Self;
+//     fn already_exists<'a>(tok: Token<'a>, message: &'static str) -> Self;
+//     fn unexpected_eof<'a>(prev_tok: Option<Token<'a>>, message: &'static str) -> Self;
+//     fn int<'a>(tok: Token<'a>) -> Self;
+//     fn float<'a>(tok: Token<'a>) -> Self;
+//     fn is_eof(&self) -> bool;
+// }
 
 #[macro_export]
 macro_rules! required {
@@ -87,5 +86,5 @@ pub trait SourceCode<'a>: Sized {
     type P: Parser<'a>;
     type Error;
 
-    fn parse(&self) -> Result<Self, Self::Error>;
+    fn parse(&self) -> Result<Self, ParserError>;
 }

@@ -2,15 +2,17 @@
 // use ord_float::Float64;
 
 // use TokenValue::*;
-use super::traits::{Parser, ParserError};
+use super::error::ParserError;
+use super::traits::Parser;
 use crate::{optional, required};
 use crate::{
     Argument, Description, Directive, DirectiveName as DirName, EnumValue, EnumValueName,
-    FieldName, Float64, StringValue, Token, TokenValue, Value, VariableName as VarName,
+    FieldName, FieldType, Float64, StringValue, Token, TokenValue, TypeName, Value,
+    VariableName as VarName,
 };
 use TokenValue::*;
 
-pub fn parse_directive<'a, P: Parser<'a>>(p: &P) -> Result<Directive<'a>, P::Error> {
+pub fn parse_directive<'a, P: Parser<'a>>(p: &P) -> Result<Directive<'a>, ParserError> {
     let name = required!(p, DirectiveName(_), "invalid directive name")?;
     let open_paren = optional!(p, OpenParen)?;
     let arguments = if open_paren.is_some() {
@@ -26,30 +28,30 @@ pub fn parse_directive<'a, P: Parser<'a>>(p: &P) -> Result<Directive<'a>, P::Err
     Ok(directive)
 }
 
-pub fn parse_arguments<'a, P: Parser<'a>>(p: &P) -> Result<Vec<Argument<'a>>, P::Error> {
+pub fn parse_arguments<'a, P: Parser<'a>>(p: &P) -> Result<Vec<Argument<'a>>, ParserError> {
     let mut arguments = Vec::new();
     loop {
         let tok = p.peek()?;
         match &tok.val {
             Name(_) => {
                 _ = p.next();
-                let name = FieldName::from(tok);
+                let field_name = FieldName::from(tok);
                 _ = required!(p, Colon, "expected ':' after arg name")?;
                 let value = parse_value(p)?;
-                arguments.push(Argument { name, value });
+                arguments.push(Argument { field_name, value });
             }
             CloseParen => {
                 _ = p.next();
                 break;
             }
-            _ => return Err(P::Error::syntax(tok, "expected argument name")),
+            _ => return Err(ParserError::syntax(tok, "expected argument name")),
         }
     }
     Ok(arguments)
 }
 
 #[inline]
-pub fn parse_value<'a, P: Parser<'a>>(p: &P) -> Result<Value<'a>, P::Error> {
+pub fn parse_value<'a, P: Parser<'a>>(p: &P) -> Result<Value<'a>, ParserError> {
     let tok = p.next()?;
     let val = match tok.val {
         StringLit(s) => Value::String(StringValue::String(s)),
@@ -62,21 +64,21 @@ pub fn parse_value<'a, P: Parser<'a>>(p: &P) -> Result<Value<'a>, P::Error> {
         VariableName(s) => Value::Variable(VarName(s)),
         OpenBracket => parse_rest_list(p)?,
         OpenCurly => parse_rest_object(p)?,
-        _ => return Err(P::Error::syntax(tok, "expected a value")),
+        _ => return Err(ParserError::syntax(tok, "expected a value")),
     };
     Ok(val)
 }
 
-fn parse_rest_list<'a, P: Parser<'a>>(_p: &P) -> Result<Value<'a>, P::Error> {
+fn parse_rest_list<'a, P: Parser<'a>>(_p: &P) -> Result<Value<'a>, ParserError> {
     // let items = Vec::new();
     todo!()
 }
 
-fn parse_rest_object<'a, P: Parser<'a>>(_p: &P) -> Result<Value<'a>, P::Error> {
+fn parse_rest_object<'a, P: Parser<'a>>(_p: &P) -> Result<Value<'a>, ParserError> {
     todo!()
 }
 
-fn parse_number<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, P::Error> {
+fn parse_number<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, ParserError> {
     // numbers with decimal point or exponent is a float else it's an int
     if s.chars().any(|c| c == '.' || c == 'e' || c == 'E') {
         parse_float::<P>(s, tok)
@@ -84,32 +86,32 @@ fn parse_number<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'
         parse_int::<P>(s, tok)
     }
 }
-fn parse_int<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, P::Error> {
+fn parse_int<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, ParserError> {
     s.parse::<i64>()
         .map(From::from)
         .map(Value::Int)
-        .map_err(|_| P::Error::int(tok))
+        .map_err(|_| ParserError::int(tok))
 }
 
-fn parse_float<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, P::Error> {
+fn parse_float<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, ParserError> {
     s.parse::<f64>()
         .map(Float64::new)
         .map(Value::Float)
-        .map_err(|_| P::Error::float(tok))
+        .map_err(|_| ParserError::float(tok))
 }
 
-pub fn parse_directives<'a, P: Parser<'a>>(p: &P) -> Result<Vec<Directive<'a>>, P::Error> {
+pub fn parse_directives<'a, P: Parser<'a>>(p: &P) -> Result<Vec<Directive<'a>>, ParserError> {
     use TokenValue::*;
     let mut directives = vec![];
     loop {
         let peeked = match p.peek() {
             Ok(tok) => tok,
             Err(e) => {
-                if P::Error::is_eof(&e) {
+                if ParserError::is_eof(&e) {
                     // eof means there are no more directives - no reason to error out.
                     return Ok(directives);
                 } else {
-                    return Err(P::Error::from(e));
+                    return Err(ParserError::from(e));
                 }
             }
         };
@@ -148,7 +150,7 @@ pub fn parse_description<'a, P: Parser<'a>>(p: &P) -> Option<Description<'a>> {
     }
 }
 
-pub fn parse_enum_value<'a, P: Parser<'a>>(p: &P) -> Result<EnumValue<'a>, P::Error> {
+pub fn parse_enum_value<'a, P: Parser<'a>>(p: &P) -> Result<EnumValue<'a>, ParserError> {
     // https://spec.graphql.org/draft/#EnumValueDefinition
     let description = parse_description(p);
     let name = required!(p, Name(_), "enum value name is required")?;
@@ -162,7 +164,7 @@ pub fn parse_enum_value<'a, P: Parser<'a>>(p: &P) -> Result<EnumValue<'a>, P::Er
     })
 }
 
-pub fn parse_enum_values<'a, P: Parser<'a>>(p: &P) -> Result<Vec<EnumValue<'a>>, P::Error> {
+pub fn parse_enum_values<'a, P: Parser<'a>>(p: &P) -> Result<Vec<EnumValue<'a>>, ParserError> {
     let mut values = Vec::new();
     loop {
         let peeked = p.peek()?;
@@ -175,12 +177,12 @@ pub fn parse_enum_values<'a, P: Parser<'a>>(p: &P) -> Result<Vec<EnumValue<'a>>,
             }
 
             CloseCurly => return Ok(values),
-            _ => return Err(P::Error::syntax(peeked, "invalid enum value")),
+            _ => return Err(ParserError::syntax(peeked, "invalid enum value")),
         }
     }
 }
 
-pub fn parse_default_value<'a, P: Parser<'a>>(p: &P) -> Result<Option<Value<'a>>, P::Error> {
+pub fn parse_default_value<'a, P: Parser<'a>>(p: &P) -> Result<Option<Value<'a>>, ParserError> {
     let equals = optional!(p, EqualSign)?;
     if equals.is_none() {
         // there is no equals sign. there is no default value.
@@ -188,4 +190,31 @@ pub fn parse_default_value<'a, P: Parser<'a>>(p: &P) -> Result<Option<Value<'a>>
     }
     let value = parse_value(p)?;
     Ok(Some(value))
+}
+
+pub fn parse_field_type<'a, P: Parser<'a>>(p: &P) -> Result<FieldType<'a>, ParserError> {
+    // let mut name: Option<Token<'a>> = None;
+
+    let tok = p.peek()?;
+    let ty = match tok.val {
+        OpenBracket => {
+            _ = p.next()?;
+            let item_type = parse_field_type(p)?;
+            _ = required!(p, CloseBracket, "list type had no closing bracket")?;
+            FieldType::List(Box::new(item_type))
+        }
+        Name(_) => {
+            // this name = required! can never fail (we just peeked the name),
+            // but we leave the message in place so we'll get a nice error
+            // message if ever...
+            let name = required!(p, Name(_), "type requires a name").unwrap();
+            FieldType::Name(TypeName::from(name))
+        }
+        _ => return Err(ParserError::syntax(tok, "type name")),
+    };
+    let bang = optional!(p, Bang)?;
+    if bang.is_some() {
+        return Ok(FieldType::NonNull(Box::new(ty)));
+    }
+    Ok(ty)
 }
