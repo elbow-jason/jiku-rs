@@ -7,7 +7,7 @@ use super::traits::Parser;
 use crate::{optional, required};
 use crate::{
     Argument, Description, Directive, DirectiveName as DirName, EnumValue, EnumValueName,
-    FieldName, FieldType, Float64, StringValue, Token, TokenValue, TypeName, Value,
+    FieldName, FieldType, Float64, Map, StringValue, Token, TokenValue, TypeName, Value,
     VariableName as VarName,
 };
 use TokenValue::*;
@@ -69,13 +69,47 @@ pub fn parse_value<'a, P: Parser<'a>>(p: &P) -> Result<Value<'a>, ParserError> {
     Ok(val)
 }
 
-fn parse_rest_list<'a, P: Parser<'a>>(_p: &P) -> Result<Value<'a>, ParserError> {
-    // let items = Vec::new();
-    todo!()
+fn parse_rest_list<'a, P: Parser<'a>>(p: &P) -> Result<Value<'a>, ParserError> {
+    let mut items = Vec::new();
+    loop {
+        let tok = p.peek()?;
+        match &tok.val {
+            CloseBracket => {
+                _ = p.next();
+                break;
+            }
+            _ => {
+                let val = parse_value(p)?;
+                items.push(val);
+            }
+        }
+    }
+    Ok(Value::List(items))
 }
 
-fn parse_rest_object<'a, P: Parser<'a>>(_p: &P) -> Result<Value<'a>, ParserError> {
-    todo!()
+fn parse_rest_object<'a, P: Parser<'a>>(p: &P) -> Result<Value<'a>, ParserError> {
+    let mut kvs = Vec::new();
+    loop {
+        let tok = p.next()?;
+        match &tok.val {
+            CloseCurly => {
+                break;
+            }
+            Name(_) => {
+                let _colon = required!(p, Colon, "expected ':' after object field name")?;
+                let val = parse_value(p)?;
+                let field_name = FieldName::from(tok);
+                kvs.push((field_name, val));
+            }
+            _ => {
+                return Err(ParserError::syntax(
+                    tok,
+                    "expected an object field name or '}'",
+                ))
+            }
+        }
+    }
+    Ok(Value::Object(Map { kvs }))
 }
 
 fn parse_number<'a, P: Parser<'a>>(s: &'a str, tok: Token<'a>) -> Result<Value<'a>, ParserError> {

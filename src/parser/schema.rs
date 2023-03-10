@@ -55,7 +55,7 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
             use TokenValue::*;
 
             match token.val {
-                Space | Tab | Newline | Comma => continue,
+                Space | Tab | Newline | Comma | Comment(_) => continue,
                 _ => {
                     let token = check_no_variables(token)?;
                     _ = self.prev_token.replace(Some(token));
@@ -71,7 +71,7 @@ impl<'a> Parser<'a> for SchemaParser<'a> {
             use TokenValue::*;
 
             match token.val {
-                Space | Tab | Newline | Comma => {
+                Space | Tab | Newline | Comma | Comment(_) => {
                     _ = self.lexer.next();
                     continue;
                 }
@@ -247,9 +247,8 @@ fn parse_object_type<'a>(
     ctx.type_name = Some(TypeName::from(name));
     let interfaces = parse_interfaces(p)?;
     let directives = values::parse_directives(p)?;
-    let _ = required!(p, OpenCurly, "object fields block did not open")?;
-    let fields = parse_field_defs(p)?;
-    let _ = required!(p, CloseCurly, "object fields block did close")?;
+    let fields = parse_optiona_field_defs(p, "expected '}' - object block did not close")?;
+
     let object_type = ObjectType {
         pos,
         description,
@@ -268,18 +267,28 @@ fn parse_directive_def<'a>(
     doc: &mut SchemaDoc<'a>,
     mut ctx: Context<'a>,
 ) -> Res<()> {
+    dbg!("here");
     let description = ctx.description.take();
+    dbg!("here");
     let Token { pos, .. } = required!(p, Name("directive"), "invalid `directive` keyword")?;
     let name = required!(p, DirectiveName(_), "invalid directive definition name")?;
+    dbg!("here");
     let open_paren = optional!(p, OpenParen)?;
+    dbg!("here", open_paren);
     let arguments = if open_paren.is_some() {
+        dbg!("here");
         parse_input_value_defs(p, CloseParen, "invalid directive definition argument")?
     } else {
+        dbg!("here");
         vec![]
     };
+    dbg!("here");
     let repeatable = optional!(p, Name("repeatable"))?.is_some();
+    dbg!("here");
     let on = required!(p, Name("on"), "expected `on` in directive definition")?;
+    dbg!("here");
     let locations = parse_directive_locations(p, on)?;
+    dbg!("here");
     let directive_def = DirectiveDef {
         description,
         name: DirName::from(name),
@@ -288,6 +297,7 @@ fn parse_directive_def<'a>(
         arguments,
         locations,
     };
+    dbg!(&directive_def);
     let def = Definition::DirectiveDef(directive_def);
     doc.definitions.push(def);
     Ok(())
@@ -299,14 +309,35 @@ fn parse_directive_locations<'a>(
 ) -> Res<Vec<DirectiveLocation>> {
     let mut locations = Vec::new();
     loop {
-        let _pipe = optional!(p, Pipe)?;
-        let location_tok = optional!(p, Name(_))?;
-        if location_tok.is_none() {
-            break;
+        let pipe = optional!(p, Pipe)?;
+        if locations.len() > 0 && pipe.is_none() {
+            // there is no pipe between directive locations or we are done
+            // parsing the directive def.
+            let peeked = match p.peek() {
+                // not interested in errors. just break.
+                Err(_) => break,
+                Ok(peeked) => peeked,
+            };
+            match DirectiveLocation::from_str(peeked.as_str()) {
+                Some(_) => {
+                    // there are two directive locations right next to each other
+                    // with a `|` in the middle.
+                    return Err(ParserError::syntax(
+                        peeked,
+                        "missing `|` between directive locations",
+                    ));
+                }
+                None => {
+                    // it's not a location - we are done parsing the directive def.
+                    break;
+                }
+            }
         }
-        let location_tok = location_tok.unwrap();
+        let location_tok = p.peek()?;
         match DirectiveLocation::from_str(location_tok.as_str()) {
             Some(location) => {
+                // we found a directive location. eat the next.
+                _ = p.next().unwrap();
                 locations.push(location);
                 continue;
             }
@@ -319,6 +350,7 @@ fn parse_directive_locations<'a>(
             "expected at least one directive location after `on`",
         ));
     }
+    _ = dbg!(p.peek());
     Ok(locations)
 }
 
@@ -342,6 +374,17 @@ fn parse_interfaces<'a>(p: &SchemaParser<'a>) -> Res<Vec<InterfaceName<'a>>> {
     }
 }
 
+fn parse_optiona_field_defs<'a>(p: &SchemaParser<'a>, msg: &'static str) -> Res<Vec<FieldDef<'a>>> {
+    let open = optional!(p, OpenCurly)?;
+    if open.is_some() {
+        let fields = parse_field_defs(p)?;
+        let _ = required!(p, CloseCurly, msg)?;
+        Ok(fields)
+    } else {
+        Ok(vec![])
+    }
+}
+
 fn parse_interface_type<'a>(
     p: &SchemaParser<'a>,
     doc: &mut SchemaDoc<'a>,
@@ -351,17 +394,17 @@ fn parse_interface_type<'a>(
     let Token { pos, .. } = required!(p, Name("interface"), "invalid `interface` identifier")?;
     let name = required!(p, Name(_), "invalid interface name")?;
     ctx.type_name = Some(TypeName::from(name));
+    let interfaces = parse_interfaces(p)?;
     let directives = values::parse_directives(p)?;
-    let _ = required!(p, OpenCurly, "interface fields block did not open")?;
-    let fields = parse_field_defs(p)?;
-    let _ = required!(p, CloseCurly, "interface fields block did close")?;
+    // optional {}
+    let fields = parse_optiona_field_defs(p, "expected '}' - unclosed interface fields block")?;
     let interface_type = InterfaceType {
         pos,
         description,
         name: TypeName::from(name),
         directives,
         fields,
-        interfaces: vec![],
+        interfaces,
     };
     let def = Definition::TypeDef(TypeDef::Interface(interface_type));
     doc.definitions.push(def);
@@ -379,8 +422,13 @@ fn parse_input_object_type<'a>(
     let type_name = TypeName::from(name);
     ctx.type_name = Some(type_name);
     let directives = values::parse_directives(p)?;
-    _ = required!(p, OpenCurly, "expected input object opening curly bracket")?;
-    let fields = parse_input_value_defs(p, CloseCurly, "invalid input object field")?;
+    let open = optional!(p, OpenCurly)?;
+    let fields = if open.is_some() {
+        parse_input_value_defs(p, CloseCurly, "invalid input object field")?
+    } else {
+        vec![]
+    };
+
     let input_object_type = InputObjectType {
         pos,
         description,
@@ -421,10 +469,18 @@ fn parse_input_value_defs<'a>(
     message: &'static str,
 ) -> Res<Vec<InputValueDef<'a>>> {
     let mut fields = Vec::new();
+
     loop {
+        let description = values::parse_description(p);
         let tok = p.peek()?;
         if tok.val == closer {
             _ = p.next();
+            if description.is_some() {
+                return Err(ParserError::syntax(
+                    p.peek_prev().unwrap(),
+                    "block string does not belong at the end of a block",
+                ));
+            }
             return Ok(fields);
         }
         match tok.val {
@@ -593,9 +649,15 @@ fn parse_enum_type<'a>(
     let Token { pos, .. } = required!(p, Name("enum"), "invalid `enum` identifier")?;
     let name = required!(p, Name(_), "invalid enum name")?;
     let directives = values::parse_directives(p)?;
-    let _ = required!(p, OpenCurly, "object fields block did not open")?;
-    let values = values::parse_enum_values(p)?;
-    let _ = required!(p, CloseCurly, "object fields block did close")?;
+    let open = optional!(p, OpenCurly)?;
+    let values = if open.is_some() {
+        let enum_vals = values::parse_enum_values(p)?;
+        let _ = required!(p, CloseCurly, "object fields block did close")?;
+        enum_vals
+    } else {
+        vec![]
+    };
+
     let enum_type = EnumType {
         pos,
         description,
@@ -618,9 +680,12 @@ fn parse_union_type<'a>(
     let Token { pos, .. } = required!(p, Name("union"), "invalid `union` identifier")?;
     let name = required!(p, Name(_), "invalid union name")?;
     let directives = values::parse_directives(p)?;
-    let _ = required!(p, EqualSign, "expected union `=` sign")?;
-
-    let types = parse_union_member_types(p, &name)?;
+    let equal_sign = optional!(p, EqualSign)?;
+    let types = if equal_sign.is_some() {
+        parse_union_member_types(p, &name)?
+    } else {
+        vec![]
+    };
 
     let union_type = UnionType {
         pos,

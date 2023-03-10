@@ -40,7 +40,7 @@ impl<'a> Parser<'a> for QueryParser<'a> {
             use TokenValue::*;
 
             match token.val {
-                Space | Tab | Newline | Comma => continue,
+                Space | Tab | Newline | Comma | Comment(_) => continue,
                 _ => return Ok(token),
             }
         }
@@ -52,7 +52,7 @@ impl<'a> Parser<'a> for QueryParser<'a> {
             use TokenValue::*;
 
             match token.val {
-                Space | Tab | Newline | Comma => {
+                Space | Tab | Newline | Comma | Comment(_) => {
                     _ = self.lexer.next();
                     continue;
                 }
@@ -214,10 +214,12 @@ fn parse_variable_defs<'a>(p: &QueryParser<'a>) -> Res<Vec<VariableDef<'a>>> {
         };
         let _colon = required!(p, Colon, "expected ':' after variable name")?;
         let ty = values::parse_field_type(p)?;
+        let default_value = values::parse_default_value(p)?;
         let var_def = VariableDef {
             pos: name.pos,
             var_name: VariableName::from(name),
             field_type: FieldType::from(ty),
+            default_value,
         };
         variable_defs.push(var_def);
     }
@@ -291,14 +293,14 @@ fn parse_selection_field<'a>(p: &QueryParser<'a>) -> Res<Selection<'a>> {
 }
 
 fn parse_selection_fragment<'a>(p: &QueryParser<'a>) -> Res<Selection<'a>> {
-    let _three_dots = required!(
+    let three_dots = required!(
         p,
         ThreeDots,
         "invalid selection fragment - expected three dots"
     )?;
     let tok = p.peek()?;
     match tok.val {
-        Name("on") => parse_selection_fragment_inline(p),
+        Name("on") | DirectiveName(_) | OpenCurly => parse_selection_fragment_inline(p, three_dots),
         Name(_) => parse_selection_fragment_spread(p),
         _ => Err(ParserError::syntax(tok, "invalid selection fragment")),
     }
@@ -318,22 +320,23 @@ fn parse_selection_fragment_spread<'a>(p: &QueryParser<'a>) -> Res<Selection<'a>
     Ok(Selection::FragSpread(frag))
 }
 
-fn parse_selection_fragment_inline<'a>(p: &QueryParser<'a>) -> Res<Selection<'a>> {
-    let on = required!(
-        p,
-        Name("on"),
-        "invalid selection inline fragment - expected `on`"
-    )?;
-    let type_name = required!(
-        p,
-        Name(_),
-        "invalid selection inline fragment - expected a type name"
-    )?;
+fn parse_selection_fragment_inline<'a>(
+    p: &QueryParser<'a>,
+    three_dots: Token<'a>,
+) -> Res<Selection<'a>> {
+    let on = optional!(p, Name("on"))?;
+    let type_name = if on.is_some() {
+        let msg = "expected type name to complete type condition `on`";
+        Some(required!(p, Name(_), msg)?)
+    } else {
+        None
+    };
+
     let directives = values::parse_directives(p)?;
     let selection_set = parse_selection_set(p)?;
     let inline_fragment = InlineFrag {
-        pos: on.pos,
-        type_name: TypeName::from(type_name),
+        pos: three_dots.pos,
+        type_cond: type_name.map(|n| TypeName::from(n)),
         directives,
         selection_set,
     };
@@ -495,6 +498,7 @@ mod tests {
                 pos: Pos { line: 1, col: 15 },
                 var_name: VariableName("$myArg"),
                 field_type: FieldType::NonNull(Box::new(FieldType::Name(TypeName("String")))),
+                default_value: None,
             }
         );
 

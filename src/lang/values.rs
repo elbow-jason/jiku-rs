@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::{EnumValueName, FieldName, Pos, VariableName};
 pub use ord_float::Float64;
 
@@ -14,7 +12,7 @@ pub struct DefaultValue<'a>(Value<'a>);
 
 #[derive(Debug, Clone, Eq, Ord, PartialOrd, Hash)]
 pub struct Map<'a> {
-    kvs: BTreeMap<FieldName<'a>, Value<'a>>,
+    pub kvs: Vec<(FieldName<'a>, Value<'a>)>,
 }
 
 impl<'a> PartialEq for Map<'a> {
