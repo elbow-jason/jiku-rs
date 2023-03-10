@@ -23,8 +23,11 @@ pub enum QueryDef<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FragDef<'a> {
-    pos: Pos,
-    name: FieldName<'a>,
+    pub pos: Pos,
+    pub name: FragmentName<'a>,
+    pub type_name: TypeName<'a>,
+    pub directives: Vec<Directive<'a>>,
+    pub selection_set: Vec<Selection<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

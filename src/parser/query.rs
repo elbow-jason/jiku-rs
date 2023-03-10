@@ -1,3 +1,5 @@
+// TODO: add check for reserved words for all names.
+
 use std::cell::Cell;
 
 use super::error::ParserError;
@@ -6,9 +8,9 @@ use super::values;
 use super::ParserConfig;
 
 use crate::{
-    optional, required, Field, FieldName, FieldType, FragSpread, FragmentName, InlineFrag, Lexer,
-    OpDef, OpName, OpType, Operation, QueryDef, QueryDoc, Selection, Token, TokenValue, TypeName,
-    Value, VariableDef, VariableName,
+    optional, required, Field, FieldName, FieldType, FragDef, FragSpread, FragmentName, InlineFrag,
+    Lexer, OpDef, OpName, OpType, Operation, QueryDef, QueryDoc, Selection, Token, TokenValue,
+    TypeName, VariableDef, VariableName,
 };
 use TokenValue::*;
 type Res<T> = Result<T, ParserError>;
@@ -163,9 +165,32 @@ fn parse_operation<'a>(
 fn parse_fragment_def<'a>(
     p: &QueryParser<'a>,
     doc: &mut QueryDoc<'a>,
-    ctx: Context<'a>,
+    _ctx: Context<'a>,
 ) -> Res<()> {
-    todo!()
+    let ident = required!(p, Name("fragment"), "expected `fragment` keyword")?;
+    let pos = ident.pos;
+    let frag_name = required!(p, Name(_), "expected fragment name")?;
+    if frag_name.val == TokenValue::Name("on") {
+        return Err(ParserError::syntax(
+            frag_name,
+            "fragment name cannot be `on` is reserved",
+        ));
+    }
+    let _on = required!(p, Name("on"), "expected `on` for type condition")?;
+    let type_name = required!(p, Name(_), "expected condition type name after `on`")?;
+    let directives = values::parse_directives(p)?;
+    let selection_set = parse_selection_set(p)?;
+
+    let frag_def = FragDef {
+        pos,
+        name: FragmentName::from(frag_name),
+        type_name: TypeName::from(type_name),
+        directives,
+        selection_set,
+    };
+    let def = QueryDef::Frag(frag_def);
+    doc.definitions.push(def);
+    Ok(())
 }
 
 fn parse_variable_defs<'a>(p: &QueryParser<'a>) -> Res<Vec<VariableDef<'a>>> {
@@ -316,132 +341,17 @@ fn parse_selection_fragment_inline<'a>(p: &QueryParser<'a>) -> Res<Selection<'a>
     Ok(sel)
 }
 
-#[test]
-fn parses_simple_query_operation() {
-    let text = "query { name }";
-    let doc = parse_query(text).unwrap();
-    assert_eq!(doc.definitions.len(), 1);
-
-    if let QueryDef::Operation(Operation::OpDef(OpDef {
-        pos,
-        op_type,
-        op_name,
-        variable_defs,
-        directives,
-        selection_set,
-    })) = &doc.definitions[0]
-    {
-        assert_eq!(*pos, Pos { line: 1, col: 1 });
-        assert_eq!(*op_type, OpType::Query);
-        assert_eq!(*op_name, None);
-        assert_eq!(*variable_defs, vec![]);
-        assert_eq!(*directives, vec![]);
-        assert_eq!(selection_set.len(), 1);
-        if let Selection::Field(field) = &selection_set[0] {
-            assert_eq!(field.alias, None);
-            assert_eq!(field.name, FieldName("name"));
-            assert_eq!(field.arguments, vec![]);
-            assert_eq!(field.directives, vec![]);
-            assert_eq!(field.pos, Pos { line: 1, col: 9 });
-            assert_eq!(field.selection_set, vec![]);
-        } else {
-            panic!("not a selection field")
-        }
-    } else {
-        panic!("not schema definition: {:?}", doc.definitions[0]);
-    }
-}
-
 #[cfg(test)]
-use crate::Pos;
+mod tests {
+    use super::*;
+    use crate::{Argument, DirectiveName as DirName, Int, Pos, Value};
 
-#[test]
-fn parses_lone_selection_set_operation() {
-    let text = "{ name }";
-    let doc = parse_query(text).unwrap();
-    assert_eq!(doc.definitions.len(), 1);
+    #[test]
+    fn parses_simple_query_operation() {
+        let text = "query { name }";
+        let doc = parse_query(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
 
-    if let QueryDef::Operation(Operation::SelectionSet(selection_set)) = &doc.definitions[0] {
-        assert_eq!(selection_set.len(), 1);
-        if let Selection::Field(field) = &selection_set[0] {
-            assert_eq!(field.alias, None);
-            assert_eq!(field.name, FieldName("name"));
-            assert_eq!(field.arguments, vec![]);
-            assert_eq!(field.directives, vec![]);
-            assert_eq!(field.pos, Pos { line: 1, col: 3 });
-            assert_eq!(field.selection_set, vec![]);
-        } else {
-            panic!("not a selection field")
-        }
-    } else {
-        panic!("not schema definition: {:?}", doc.definitions[0]);
-    }
-}
-
-#[test]
-fn parses_a_named_operation_with_no_input_arguments() {
-    let text = r#"
-    query myQuery {
-        theQuery {
-            names
-        }
-    }
-    "#;
-    let doc = parse_query(text).unwrap();
-    let first_selection_set = if let QueryDef::Operation(Operation::OpDef(OpDef {
-        pos,
-        op_type,
-        op_name,
-        variable_defs,
-        directives,
-        selection_set,
-    })) = &doc.definitions[0]
-    {
-        assert_eq!(*pos, Pos { line: 1, col: 1 });
-        assert_eq!(*op_type, OpType::Query);
-        assert_eq!(*op_name, Some(OpName("myQuery")));
-        assert_eq!(*variable_defs, vec![]);
-        assert_eq!(*directives, vec![]);
-        assert_eq!(selection_set.len(), 1);
-        selection_set
-    } else {
-        panic!("not query definition: {:?}", doc.definitions[0]);
-    };
-    let second_selection_set = if let Selection::Field(field) = &first_selection_set[0] {
-        assert_eq!(field.alias, None);
-        assert_eq!(field.name, FieldName("theQuery"));
-        assert_eq!(field.arguments, vec![]);
-        assert_eq!(field.directives, vec![]);
-        assert_eq!(field.pos, Pos { line: 2, col: 9 });
-        assert_eq!(field.selection_set.len(), 1);
-        &field.selection_set
-    } else {
-        panic!("not a selection field 1")
-    };
-
-    if let Selection::Field(field) = &second_selection_set[0] {
-        assert_eq!(field.alias, None);
-        assert_eq!(field.name, FieldName("names"));
-        assert_eq!(field.arguments, vec![]);
-        assert_eq!(field.directives, vec![]);
-        assert_eq!(field.pos, Pos { line: 3, col: 13 });
-        assert_eq!(field.selection_set, vec![]);
-    } else {
-        panic!("not a selection field 2")
-    };
-}
-
-#[test]
-fn parses_a_named_operation_with_input_arguments() {
-    let text = r#"
-    query myQuery($myArg: String!) {
-        theQuery(theArg: $myArg) {
-            names
-        }
-    }
-    "#;
-    let doc = parse_query(text).unwrap();
-    let (first_selection_set, variable_defs) =
         if let QueryDef::Operation(Operation::OpDef(OpDef {
             pos,
             op_type,
@@ -453,47 +363,226 @@ fn parses_a_named_operation_with_input_arguments() {
         {
             assert_eq!(*pos, Pos { line: 1, col: 1 });
             assert_eq!(*op_type, OpType::Query);
-            assert_eq!(*op_name, Some(OpName("myQuery")));
-            assert_eq!(variable_defs.len(), 1);
-            assert_eq!(directives.len(), 0);
+            assert_eq!(*op_name, None);
+            assert_eq!(*variable_defs, vec![]);
+            assert_eq!(*directives, vec![]);
             assert_eq!(selection_set.len(), 1);
-            (selection_set, variable_defs)
+            if let Selection::Field(field) = &selection_set[0] {
+                assert_eq!(field.alias, None);
+                assert_eq!(field.name, FieldName("name"));
+                assert_eq!(field.arguments, vec![]);
+                assert_eq!(field.directives, vec![]);
+                assert_eq!(field.pos, Pos { line: 1, col: 9 });
+                assert_eq!(field.selection_set, vec![]);
+            } else {
+                panic!("not a selection field")
+            }
+        } else {
+            panic!("not schema definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_lone_selection_set_operation() {
+        let text = "{ name }";
+        let doc = parse_query(text).unwrap();
+        assert_eq!(doc.definitions.len(), 1);
+
+        if let QueryDef::Operation(Operation::SelectionSet(selection_set)) = &doc.definitions[0] {
+            assert_eq!(selection_set.len(), 1);
+            if let Selection::Field(field) = &selection_set[0] {
+                assert_eq!(field.alias, None);
+                assert_eq!(field.name, FieldName("name"));
+                assert_eq!(field.arguments, vec![]);
+                assert_eq!(field.directives, vec![]);
+                assert_eq!(field.pos, Pos { line: 1, col: 3 });
+                assert_eq!(field.selection_set, vec![]);
+            } else {
+                panic!("not a selection field")
+            }
+        } else {
+            panic!("not schema definition: {:?}", doc.definitions[0]);
+        }
+    }
+
+    #[test]
+    fn parses_a_named_operation_with_no_input_arguments() {
+        let text = r#"
+    query myQuery {
+        theQuery {
+            names
+        }
+    }
+    "#;
+        let doc = parse_query(text).unwrap();
+        let first_selection_set = if let QueryDef::Operation(Operation::OpDef(OpDef {
+            pos,
+            op_type,
+            op_name,
+            variable_defs,
+            directives,
+            selection_set,
+        })) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, Pos { line: 1, col: 1 });
+            assert_eq!(*op_type, OpType::Query);
+            assert_eq!(*op_name, Some(OpName("myQuery")));
+            assert_eq!(*variable_defs, vec![]);
+            assert_eq!(*directives, vec![]);
+            assert_eq!(selection_set.len(), 1);
+            selection_set
         } else {
             panic!("not query definition: {:?}", doc.definitions[0]);
         };
-    let var_def = &variable_defs[0];
-    assert_eq!(
-        var_def,
-        &VariableDef {
-            pos: Pos { line: 1, col: 15 },
-            var_name: VariableName("$myArg"),
-            field_type: FieldType::NonNull(Box::new(FieldType::Name(TypeName("String")))),
+        let second_selection_set = if let Selection::Field(field) = &first_selection_set[0] {
+            assert_eq!(field.alias, None);
+            assert_eq!(field.name, FieldName("theQuery"));
+            assert_eq!(field.arguments, vec![]);
+            assert_eq!(field.directives, vec![]);
+            assert_eq!(field.pos, Pos { line: 2, col: 9 });
+            assert_eq!(field.selection_set.len(), 1);
+            &field.selection_set
+        } else {
+            panic!("not a selection field 1")
+        };
+
+        if let Selection::Field(field) = &second_selection_set[0] {
+            assert_eq!(field.alias, None);
+            assert_eq!(field.name, FieldName("names"));
+            assert_eq!(field.arguments, vec![]);
+            assert_eq!(field.directives, vec![]);
+            assert_eq!(field.pos, Pos { line: 3, col: 13 });
+            assert_eq!(field.selection_set, vec![]);
+        } else {
+            panic!("not a selection field 2")
+        };
+    }
+
+    #[test]
+    fn parses_a_named_operation_with_input_arguments() {
+        let text = r#"
+    query myQuery($myArg: String!) {
+        theQuery(theArg: $myArg) {
+            names
         }
-    );
+    }
+    "#;
+        let doc = parse_query(text).unwrap();
+        let (first_selection_set, variable_defs) =
+            if let QueryDef::Operation(Operation::OpDef(OpDef {
+                pos,
+                op_type,
+                op_name,
+                variable_defs,
+                directives,
+                selection_set,
+            })) = &doc.definitions[0]
+            {
+                assert_eq!(*pos, Pos { line: 1, col: 1 });
+                assert_eq!(*op_type, OpType::Query);
+                assert_eq!(*op_name, Some(OpName("myQuery")));
+                assert_eq!(variable_defs.len(), 1);
+                assert_eq!(directives.len(), 0);
+                assert_eq!(selection_set.len(), 1);
+                (selection_set, variable_defs)
+            } else {
+                panic!("not query definition: {:?}", doc.definitions[0]);
+            };
+        let var_def = &variable_defs[0];
+        assert_eq!(
+            var_def,
+            &VariableDef {
+                pos: Pos { line: 1, col: 15 },
+                var_name: VariableName("$myArg"),
+                field_type: FieldType::NonNull(Box::new(FieldType::Name(TypeName("String")))),
+            }
+        );
 
-    let (second_selection_set, args) = if let Selection::Field(field) = &first_selection_set[0] {
-        assert_eq!(field.alias, None);
-        assert_eq!(field.name, FieldName("theQuery"));
-        assert_eq!(field.arguments.len(), 1);
-        assert_eq!(field.directives, vec![]);
-        assert_eq!(field.pos, Pos { line: 2, col: 9 });
-        assert_eq!(field.selection_set.len(), 1);
-        (&field.selection_set, &field.arguments)
-    } else {
-        panic!("not a selection field 1")
-    };
-    let arg = &args[0];
-    assert_eq!(arg.field_name, FieldName("theArg"));
-    assert_eq!(arg.value, Value::Variable(VariableName("$myArg")));
+        let (second_selection_set, args) = if let Selection::Field(field) = &first_selection_set[0]
+        {
+            assert_eq!(field.alias, None);
+            assert_eq!(field.name, FieldName("theQuery"));
+            assert_eq!(field.arguments.len(), 1);
+            assert_eq!(field.directives, vec![]);
+            assert_eq!(field.pos, Pos { line: 2, col: 9 });
+            assert_eq!(field.selection_set.len(), 1);
+            (&field.selection_set, &field.arguments)
+        } else {
+            panic!("not a selection field 1")
+        };
+        let arg = &args[0];
+        assert_eq!(arg.field_name, FieldName("theArg"));
+        assert_eq!(arg.value, Value::Variable(VariableName("$myArg")));
 
-    if let Selection::Field(field) = &second_selection_set[0] {
-        assert_eq!(field.alias, None);
-        assert_eq!(field.name, FieldName("names"));
-        assert_eq!(field.arguments, vec![]);
-        assert_eq!(field.directives, vec![]);
-        assert_eq!(field.pos, Pos { line: 3, col: 13 });
-        assert_eq!(field.selection_set, vec![]);
-    } else {
-        panic!("not a selection field 2")
-    };
+        if let Selection::Field(field) = &second_selection_set[0] {
+            assert_eq!(field.alias, None);
+            assert_eq!(field.name, FieldName("names"));
+            assert_eq!(field.arguments, vec![]);
+            assert_eq!(field.directives, vec![]);
+            assert_eq!(field.pos, Pos { line: 3, col: 13 });
+            assert_eq!(field.selection_set, vec![]);
+        } else {
+            panic!("not a selection field 2")
+        };
+    }
+
+    #[test]
+    fn parses_a_fragment_definition() {
+        let text = r#"
+        fragment standardProfilePic on User @blep(active: true) {
+            profilePic(size: 50)
+        }
+        "#;
+        let doc = parse_query(text).unwrap();
+        let (directives, selection_set) = if let QueryDef::Frag(FragDef {
+            pos,
+            name,
+            type_name,
+            directives,
+            selection_set,
+        }) = &doc.definitions[0]
+        {
+            assert_eq!(*pos, Pos { line: 1, col: 1 });
+            assert_eq!(*name, FragmentName("standardProfilePic"));
+            assert_eq!(*type_name, TypeName("User"));
+            assert_eq!(directives.len(), 1);
+            assert_eq!(selection_set.len(), 1);
+            (directives, selection_set)
+        } else {
+            panic!("not a fragment definition: {:?}", doc.definitions[0]);
+        };
+        let directive = &directives[0];
+
+        assert_eq!(directive.name, DirName("@blep"));
+        assert_eq!(directive.location, None);
+        assert_eq!(
+            directive.arguments,
+            vec![Argument {
+                field_name: FieldName("active"),
+                value: Value::Boolean(true)
+            }]
+        );
+        if let Selection::Field(Field {
+            pos,
+            alias,
+            name,
+            arguments,
+            directives,
+            selection_set,
+        }) = &selection_set[0]
+        {
+            assert_eq!(*pos, Pos { line: 2, col: 13 });
+            assert_eq!(*alias, None);
+            assert_eq!(*name, FieldName("profilePic"));
+            assert_eq!(
+                *arguments,
+                vec![Argument {
+                    field_name: FieldName("size"),
+                    value: Value::Int(Int(50))
+                }]
+            );
+            assert_eq!(*directives, vec![]);
+            assert_eq!(*selection_set, vec![]);
+        }
+    }
 }
