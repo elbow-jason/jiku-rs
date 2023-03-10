@@ -585,4 +585,127 @@ mod tests {
             assert_eq!(*selection_set, vec![]);
         }
     }
+
+    #[test]
+    fn parses_nested_fragments() {
+        let text = r#"
+        query withNestedFragments {
+          user(id: 4) {
+            friends(first: 10) {
+              ...friendFields
+            }
+            mutualFriends(first: 101) {
+              ...friendFields
+            }
+          }
+        }
+        "#;
+        let doc = parse_query(text).unwrap();
+        let user = if let QueryDef::Operation(Operation::OpDef(OpDef {
+            op_type,
+            op_name,
+            variable_defs,
+            directives,
+            selection_set,
+            ..
+        })) = &doc.definitions[0]
+        {
+            assert_eq!(*op_type, OpType::Query);
+            assert_eq!(*op_name, Some(OpName("withNestedFragments")));
+            assert_eq!(variable_defs.len(), 0);
+            assert_eq!(directives.len(), 0);
+            assert_eq!(selection_set.len(), 1);
+            &selection_set[0]
+        } else {
+            panic!("not an operation {:?}", doc.definitions[0]);
+        };
+        let (friends, mutual_friends) = if let Selection::Field(Field {
+            alias,
+            name,
+            arguments,
+            directives,
+            selection_set,
+            ..
+        }) = &user
+        {
+            assert_eq!(*alias, None);
+            assert_eq!(*name, FieldName("user"));
+            assert_eq!(
+                arguments,
+                &vec![Argument {
+                    field_name: FieldName("id"),
+                    value: Value::Int(Int(4))
+                }]
+            );
+            assert_eq!(directives.len(), 0);
+            assert_eq!(selection_set.len(), 2);
+            let friends = &selection_set[0];
+            let mutual_friends = &selection_set[1];
+            (friends, mutual_friends)
+        } else {
+            panic!("not a field {:?}", user);
+        };
+        let friends_splat = if let Selection::Field(Field {
+            alias,
+            name,
+            arguments,
+            directives,
+            selection_set,
+            ..
+        }) = friends
+        {
+            assert_eq!(*alias, None);
+            assert_eq!(*name, FieldName("friends"));
+            assert_eq!(
+                arguments,
+                &vec![Argument {
+                    field_name: FieldName("first"),
+                    value: Value::Int(Int(10))
+                }]
+            );
+            assert_eq!(directives.len(), 0);
+            assert_eq!(selection_set.len(), 1);
+            &selection_set[0]
+        } else {
+            panic!("friends is not a field {:?}", friends);
+        };
+
+        let mutual_friends_splat = if let Selection::Field(Field {
+            alias,
+            name,
+            arguments,
+            directives,
+            selection_set,
+            ..
+        }) = mutual_friends
+        {
+            assert_eq!(*alias, None);
+            assert_eq!(*name, FieldName("mutualFriends"));
+            assert_eq!(
+                arguments,
+                &vec![Argument {
+                    field_name: FieldName("first"),
+                    value: Value::Int(Int(101))
+                }]
+            );
+            assert_eq!(directives.len(), 0);
+            assert_eq!(selection_set.len(), 1);
+            &selection_set[0]
+        } else {
+            panic!("mutual_friends is not a field {:?}", friends);
+        };
+        if let Selection::FragSpread(FragSpread { pos, name }) = friends_splat {
+            assert_eq!(*pos, Pos { line: 4, col: 18 });
+            assert_eq!(*name, FragmentName("friendFields"));
+        } else {
+            panic!("friends_splat is not a fragment {:?}", friends_splat);
+        }
+
+        if let Selection::FragSpread(FragSpread { pos, name }) = mutual_friends_splat {
+            assert_eq!(*pos, Pos { line: 7, col: 18 });
+            assert_eq!(*name, FragmentName("friendFields"));
+        } else {
+            panic!("mutual_friends_splat is not a fragment {:?}", friends_splat);
+        }
+    }
 }

@@ -99,7 +99,7 @@ pub enum TokenValue<T: AsRef<str>> {
     // @
     DirectiveName(T),
     // ...friendFields
-    Fragment(T),
+    // Fragment(T),
     // |
     Pipe,
 
@@ -133,7 +133,6 @@ impl<'a> TokenValue<&'a str> {
             Name(s) => Name(s.to_string()),
             NumberLit(s) => NumberLit(s.to_string()),
             DirectiveName(s) => DirectiveName(s.to_string()),
-            Fragment(s) => Fragment(s.to_string()),
             VariableName(s) => VariableName(s.to_string()),
             Comment(s) => Comment(s.to_string()),
             Unknown(s, msg) => Unknown(s.to_string(), msg),
@@ -166,7 +165,6 @@ impl<'a> TokenValue<&'a str> {
             | BlockStringLit(s)
             | Name(s)
             | DirectiveName(s)
-            | Fragment(s)
             | VariableName(s)
             | Comment(s)
             | Unknown(s, _)
@@ -204,7 +202,6 @@ impl TokenValue<String> {
             | BlockStringLit(s)
             | Name(s)
             | DirectiveName(s)
-            | Fragment(s)
             | VariableName(s)
             | Comment(s)
             | Unknown(s, _)
@@ -463,22 +460,11 @@ impl<'a> Lexer<'a> {
 
     fn rest_three_dots(&self, mut word: Word) -> TokenValueStr<'a> {
         word = word.add(self.consume_while(|c| c == '.'));
-        if word.len != 3 {
-            word = word.add(self.consume_while(char_is_human_word));
-            return self.invalid(word, Guess::ExpectedThreeDots);
+        if word.len == 3 {
+            return TokenValue::ThreeDots;
         }
-        match self.peek_char() {
-            Some(c) if char_starts_name(c) => {
-                match self.full_name_word(word, Guess::InvalidFragment) {
-                    Err(tv) => tv,
-                    Ok(word) => TokenValue::Fragment(self.slice(word)),
-                }
-            }
-            Some(_) | None => {
-                debug_assert!(self.slice(word) == "...");
-                TokenValue::ThreeDots
-            }
-        }
+        word = word.add(self.consume_while(char_is_human_word));
+        return self.invalid(word, Guess::ExpectedThreeDots);
     }
 
     fn rest_variable_name(&self, word: Word) -> TokenValueStr<'a> {
