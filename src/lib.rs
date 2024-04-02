@@ -25,6 +25,6 @@ mod api;
 use api::*;
 
 mod checker;
-use checker::*;
+// use checker::*;
 
 mod ast;

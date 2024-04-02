@@ -8,9 +8,9 @@ use super::values;
 use super::ParserConfig;
 
 use crate::{
-    optional, required, Field, FieldName, FieldType, FieldTypeWrapper, FragDef, FragSpread,
-    FragmentName, InlineFrag, Lexer, OpDef, OpName, OpType, Operation, QueryDef, QueryDoc,
-    Selection, Token, TokenValue, TypeName, VariableDef, VariableName,
+    optional, required, Field, FieldName, FieldType, FragDef, FragSpread, FragmentName, InlineFrag,
+    Lexer, OpDef, OpName, OpType, Operation, QueryDef, QueryDoc, Selection, Token, TokenValue,
+    TypeName, VariableDef, VariableName,
 };
 use TokenValue::*;
 type Res<T> = Result<T, ParserError>;
@@ -470,6 +470,8 @@ mod tests {
 
     #[test]
     fn parses_a_named_operation_with_input_arguments() {
+        use crate::FieldTypeWrapper;
+
         let text = r#"
     query myQuery($myArg: String!) {
         theQuery(theArg: $myArg) {

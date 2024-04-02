@@ -691,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn lexer_cr_does_not_change_Pos() {
+    fn lexer_cr_does_not_change_pos() {
         let text = "\r\r  ";
         let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Some(tok(CarriageReturn, Pos(1, 1))));
@@ -712,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn lexer_unicode_bom_does_not_change_Pos() {
+    fn lexer_unicode_bom_does_not_change_pos() {
         let text = "\u{FEFF}\u{FEFF}  ";
         let lexer = Lexer::new(text);
         assert_eq!(lexer.next(), Some(tok(UnicodeBom, Pos(1, 1))));
