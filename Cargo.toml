@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "1.0.38"
+thiserror = "1.0.47"
 ord_float = { git = "https://github.com/elbow-jason/ord_float.git" }
+fnv = "1.0.7"

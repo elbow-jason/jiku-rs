@@ -10,8 +10,13 @@ pub trait Parser<'a> {
         ParserError::syntax(tok, message)
     }
 
-    fn already_exists_err<'e>(&self, tok: Token<'e>, message: &'static str) -> ParserError {
-        ParserError::already_exists(tok, message)
+    fn already_exists_err<'e>(
+        &self,
+        tok: Token<'e>,
+        message: &'static str,
+        exists: Option<Token<'a>>,
+    ) -> ParserError {
+        ParserError::already_exists(tok, message, exists)
     }
 
     fn int_err<'e>(&self, tok: Token<'e>) -> ParserError {

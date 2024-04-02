@@ -18,7 +18,13 @@ pub use lang::*;
 mod error;
 // pub use error::Error;
 
-mod checker;
 mod parser;
 pub use parser::*;
-mod sourcer;
+
+mod api;
+use api::*;
+
+mod checker;
+use checker::*;
+
+mod ast;

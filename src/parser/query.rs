@@ -8,9 +8,9 @@ use super::values;
 use super::ParserConfig;
 
 use crate::{
-    optional, required, Field, FieldName, FieldType, FragDef, FragSpread, FragmentName, InlineFrag,
-    Lexer, OpDef, OpName, OpType, Operation, QueryDef, QueryDoc, Selection, Token, TokenValue,
-    TypeName, VariableDef, VariableName,
+    optional, required, Field, FieldName, FieldType, FieldTypeWrapper, FragDef, FragSpread,
+    FragmentName, InlineFrag, Lexer, OpDef, OpName, OpType, Operation, QueryDef, QueryDoc,
+    Selection, Token, TokenValue, TypeName, VariableDef, VariableName,
 };
 use TokenValue::*;
 type Res<T> = Result<T, ParserError>;
@@ -198,6 +198,7 @@ fn parse_variable_defs<'a>(p: &QueryParser<'a>) -> Res<Vec<VariableDef<'a>>> {
     if open.is_none() {
         return Ok(Vec::new());
     }
+
     let mut variable_defs = Vec::new();
     loop {
         let tok = p.peek()?;
@@ -255,7 +256,13 @@ fn parse_selection_set<'a>(p: &QueryParser<'a>) -> Res<Vec<Selection<'a>>> {
             }
         }
     }
-
+    if selections.is_empty() {
+        return Err(ParserError::syntax(
+            open_curly.unwrap(),
+            // thx, crumm.
+            "selection set cannot be empty",
+        ));
+    }
     Ok(selections)
 }
 
@@ -364,7 +371,7 @@ mod tests {
             selection_set,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, Pos { line: 1, col: 1 });
+            assert_eq!(*pos, Pos(1, 1));
             assert_eq!(*op_type, OpType::Query);
             assert_eq!(*op_name, None);
             assert_eq!(*variable_defs, vec![]);
@@ -375,7 +382,7 @@ mod tests {
                 assert_eq!(field.name, FieldName("name"));
                 assert_eq!(field.arguments, vec![]);
                 assert_eq!(field.directives, vec![]);
-                assert_eq!(field.pos, Pos { line: 1, col: 9 });
+                assert_eq!(field.pos, Pos(1, 9));
                 assert_eq!(field.selection_set, vec![]);
             } else {
                 panic!("not a selection field")
@@ -398,7 +405,7 @@ mod tests {
                 assert_eq!(field.name, FieldName("name"));
                 assert_eq!(field.arguments, vec![]);
                 assert_eq!(field.directives, vec![]);
-                assert_eq!(field.pos, Pos { line: 1, col: 3 });
+                assert_eq!(field.pos, Pos(1, 3));
                 assert_eq!(field.selection_set, vec![]);
             } else {
                 panic!("not a selection field")
@@ -427,7 +434,7 @@ mod tests {
             selection_set,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, Pos { line: 1, col: 1 });
+            assert_eq!(*pos, Pos(1, 1));
             assert_eq!(*op_type, OpType::Query);
             assert_eq!(*op_name, Some(OpName("myQuery")));
             assert_eq!(*variable_defs, vec![]);
@@ -442,7 +449,7 @@ mod tests {
             assert_eq!(field.name, FieldName("theQuery"));
             assert_eq!(field.arguments, vec![]);
             assert_eq!(field.directives, vec![]);
-            assert_eq!(field.pos, Pos { line: 2, col: 9 });
+            assert_eq!(field.pos, Pos(2, 9));
             assert_eq!(field.selection_set.len(), 1);
             &field.selection_set
         } else {
@@ -454,7 +461,7 @@ mod tests {
             assert_eq!(field.name, FieldName("names"));
             assert_eq!(field.arguments, vec![]);
             assert_eq!(field.directives, vec![]);
-            assert_eq!(field.pos, Pos { line: 3, col: 13 });
+            assert_eq!(field.pos, Pos(3, 13));
             assert_eq!(field.selection_set, vec![]);
         } else {
             panic!("not a selection field 2")
@@ -481,7 +488,7 @@ mod tests {
                 selection_set,
             })) = &doc.definitions[0]
             {
-                assert_eq!(*pos, Pos { line: 1, col: 1 });
+                assert_eq!(*pos, Pos(1, 1));
                 assert_eq!(*op_type, OpType::Query);
                 assert_eq!(*op_name, Some(OpName("myQuery")));
                 assert_eq!(variable_defs.len(), 1);
@@ -495,9 +502,12 @@ mod tests {
         assert_eq!(
             var_def,
             &VariableDef {
-                pos: Pos { line: 1, col: 15 },
+                pos: Pos(1, 15),
                 var_name: VariableName("$myArg"),
-                field_type: FieldType::NonNull(Box::new(FieldType::Name(TypeName("String")))),
+                field_type: FieldType {
+                    type_name: TypeName("String"),
+                    wrappers: vec![FieldTypeWrapper::NonNull],
+                },
                 default_value: None,
             }
         );
@@ -508,7 +518,7 @@ mod tests {
             assert_eq!(field.name, FieldName("theQuery"));
             assert_eq!(field.arguments.len(), 1);
             assert_eq!(field.directives, vec![]);
-            assert_eq!(field.pos, Pos { line: 2, col: 9 });
+            assert_eq!(field.pos, Pos(2, 9));
             assert_eq!(field.selection_set.len(), 1);
             (&field.selection_set, &field.arguments)
         } else {
@@ -523,7 +533,7 @@ mod tests {
             assert_eq!(field.name, FieldName("names"));
             assert_eq!(field.arguments, vec![]);
             assert_eq!(field.directives, vec![]);
-            assert_eq!(field.pos, Pos { line: 3, col: 13 });
+            assert_eq!(field.pos, Pos(3, 13));
             assert_eq!(field.selection_set, vec![]);
         } else {
             panic!("not a selection field 2")
@@ -546,7 +556,7 @@ mod tests {
             selection_set,
         }) = &doc.definitions[0]
         {
-            assert_eq!(*pos, Pos { line: 1, col: 1 });
+            assert_eq!(*pos, Pos(1, 1));
             assert_eq!(*name, FragmentName("standardProfilePic"));
             assert_eq!(*type_name, TypeName("User"));
             assert_eq!(directives.len(), 1);
@@ -575,7 +585,7 @@ mod tests {
             selection_set,
         }) = &selection_set[0]
         {
-            assert_eq!(*pos, Pos { line: 2, col: 13 });
+            assert_eq!(*pos, Pos(2, 13));
             assert_eq!(*alias, None);
             assert_eq!(*name, FieldName("profilePic"));
             assert_eq!(
@@ -699,17 +709,36 @@ mod tests {
             panic!("mutual_friends is not a field {:?}", friends);
         };
         if let Selection::FragSpread(FragSpread { pos, name }) = friends_splat {
-            assert_eq!(*pos, Pos { line: 4, col: 18 });
+            assert_eq!(*pos, Pos(4, 18));
             assert_eq!(*name, FragmentName("friendFields"));
         } else {
             panic!("friends_splat is not a fragment {:?}", friends_splat);
         }
 
         if let Selection::FragSpread(FragSpread { pos, name }) = mutual_friends_splat {
-            assert_eq!(*pos, Pos { line: 7, col: 18 });
+            assert_eq!(*pos, Pos(7, 18));
             assert_eq!(*name, FragmentName("friendFields"));
         } else {
             panic!("mutual_friends_splat is not a fragment {:?}", friends_splat);
         }
+    }
+
+    #[test]
+    fn syntax_error_for_empty_selection_set() {
+        let text = r#"
+        query {
+            hero {}
+        }
+        "#;
+        let res = parse_query(text);
+        assert!(res.is_err());
+        assert_eq!(
+            res.unwrap_err(),
+            ParserError::SyntaxError {
+                value: TokenValue::OpenCurly,
+                pos: Pos(2, 18),
+                message: "selection set cannot be empty"
+            }
+        )
     }
 }

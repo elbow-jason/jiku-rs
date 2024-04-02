@@ -36,27 +36,44 @@ impl<'a> SchemaDoc<'a> {
 pub enum Definition<'a> {
     SchemaDef(SchemaDef<'a>),
     TypeDef(TypeDef<'a>),
-    Extension(Extension<'a>),
+    Ext(Ext<'a>),
     DirectiveDef(DirectiveDef<'a>),
 }
 
+pub struct Extends<'a> {
+    pub pos: Pos,
+    pub description: Option<Description<'a>>,
+    pub ext: Ext<'a>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum Extension<'a> {
-    TypeExt(TypeExt<'a>),
+pub enum Ext<'a> {
+    ScalarTypeExt(ScalarTypeExt<'a>),
+    ObjectTypeExt(ObjectTypeExt<'a>),
+    InterfaceTypeExt(InterfaceTypeExt<'a>),
+    UnionTypeExt(UnionTypeExt<'a>),
+    EnumTypeExt(EnumTypeExt<'a>),
+    InputObjectTypeExt(InputObjectTypeExt<'a>),
     SchemaExt(SchemaExt<'a>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TypeExt<'a> {
-    pub pos: Pos,
-    pub description: Option<Description<'a>>,
-    // some of the typedef structs are capable of
-    // representing states that type extensions do not represent.
-    // is this a concern?
-    // Yes. Don't be lazy. Just type them out. No.
-    // TODO: make invalid states impossible for TypeExt.
-    pub type_def: TypeDef<'a>,
-}
+pub struct ScalarTypeExt<'a>(pub ScalarType<'a>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectTypeExt<'a>(pub ObjectType<'a>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceTypeExt<'a>(pub InterfaceType<'a>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnionTypeExt<'a>(pub UnionType<'a>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumTypeExt<'a>(pub EnumType<'a>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InputObjectTypeExt<'a>(pub InputObjectType<'a>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaExt<'a> {
@@ -77,12 +94,12 @@ pub struct DirectiveDef<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeDef<'a> {
-    Object(ObjectType<'a>),
-    InputObject(InputObjectType<'a>),
-    Scalar(ScalarType<'a>),
-    Interface(InterfaceType<'a>),
-    Union(UnionType<'a>),
-    Enum(EnumType<'a>),
+    ObjectType(ObjectType<'a>),
+    InputObjectType(InputObjectType<'a>),
+    ScalarType(ScalarType<'a>),
+    InterfaceType(InterfaceType<'a>),
+    UnionType(UnionType<'a>),
+    EnumType(EnumType<'a>),
 }
 
 /// https://spec.graphql.org/draft/#sec-Unions

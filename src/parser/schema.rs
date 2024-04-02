@@ -5,9 +5,10 @@ use super::ParserConfig;
 use crate::DirectiveLocation;
 use crate::{
     optional, required, Definition, Description, DirectiveDef, DirectiveName as DirName, EnumType,
-    Extension, FieldDef, FieldName, InputObjectType, InputValueDef, InterfaceName, InterfaceType,
-    Lexer, ObjectType, ScalarType, SchemaDef, SchemaDoc, SchemaExt, Token, TokenValue, TypeDef,
-    TypeExt, TypeName, UnionType,
+    EnumTypeExt, Ext, FieldDef, FieldName, InputObjectType, InputObjectTypeExt, InputValueDef,
+    InterfaceName, InterfaceType, InterfaceTypeExt, Lexer, ObjectType, ObjectTypeExt, ScalarType,
+    ScalarTypeExt, SchemaDef, SchemaDoc, SchemaExt, Token, TokenValue, TypeDef, TypeName,
+    UnionType, UnionTypeExt,
 };
 
 use std::cell::Cell;
@@ -184,13 +185,16 @@ fn parse_extension<'a>(
     let () = _parse_top_level_once_with_context(p, &mut fake_doc, ctx, peeked)?;
     match fake_doc.definitions.len() {
         1 => match fake_doc.definitions.pop().unwrap() {
-            Definition::TypeDef(type_def) => {
-                let type_ext = TypeExt {
-                    pos,
-                    description,
-                    type_def,
+            Definition::TypeDef(td) => {
+                let ext = match td {
+                    TypeDef::ObjectType(t) => Ext::ObjectTypeExt(ObjectTypeExt(t)),
+                    TypeDef::EnumType(t) => Ext::EnumTypeExt(EnumTypeExt(t)),
+                    TypeDef::InputObjectType(t) => Ext::InputObjectTypeExt(InputObjectTypeExt(t)),
+                    TypeDef::InterfaceType(t) => Ext::InterfaceTypeExt(InterfaceTypeExt(t)),
+                    TypeDef::ScalarType(t) => Ext::ScalarTypeExt(ScalarTypeExt(t)),
+                    TypeDef::UnionType(t) => Ext::UnionTypeExt(UnionTypeExt(t)),
                 };
-                let def = Definition::Extension(Extension::TypeExt(type_ext));
+                let def = Definition::Ext(ext);
                 doc.definitions.push(def);
                 Ok(())
             }
@@ -200,17 +204,18 @@ fn parse_extension<'a>(
                     description,
                     schema_def,
                 };
-                let def = Definition::Extension(Extension::SchemaExt(schema_ext));
+                let def = Definition::Ext(Ext::SchemaExt(schema_ext));
                 doc.definitions.push(def);
                 Ok(())
             }
-
-            _ => {
-                return Err(ParserError::syntax(
-                    extend_keyword,
-                    "invalid type extension",
-                ))
-            }
+            Definition::Ext(_) => Err(ParserError::syntax(
+                extend_keyword,
+                "encountered two `extend` keywords in a row",
+            )),
+            Definition::DirectiveDef(_) => Err(ParserError::syntax(
+                extend_keyword,
+                "keyword `extend` cannot be followed by a directive definition",
+            )),
         },
         _ => Err(ParserError::syntax(
             extend_keyword,
@@ -229,7 +234,7 @@ fn replace_none_token<'a>(
     message: &'static str,
 ) -> Res<Option<Token<'a>>> {
     if slot.is_some() {
-        return Err(ParserError::already_exists(tok, message));
+        return Err(ParserError::already_exists(tok, message, slot));
     }
     slot = Some(tok);
     Ok(slot)
@@ -257,7 +262,7 @@ fn parse_object_type<'a>(
         fields,
         interfaces,
     };
-    let def = Definition::TypeDef(TypeDef::Object(object_type));
+    let def = Definition::TypeDef(TypeDef::ObjectType(object_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -267,28 +272,18 @@ fn parse_directive_def<'a>(
     doc: &mut SchemaDoc<'a>,
     mut ctx: Context<'a>,
 ) -> Res<()> {
-    dbg!("here");
     let description = ctx.description.take();
-    dbg!("here");
     let Token { pos, .. } = required!(p, Name("directive"), "invalid `directive` keyword")?;
     let name = required!(p, DirectiveName(_), "invalid directive definition name")?;
-    dbg!("here");
     let open_paren = optional!(p, OpenParen)?;
-    dbg!("here", open_paren);
     let arguments = if open_paren.is_some() {
-        dbg!("here");
         parse_input_value_defs(p, CloseParen, "invalid directive definition argument")?
     } else {
-        dbg!("here");
         vec![]
     };
-    dbg!("here");
     let repeatable = optional!(p, Name("repeatable"))?.is_some();
-    dbg!("here");
     let on = required!(p, Name("on"), "expected `on` in directive definition")?;
-    dbg!("here");
     let locations = parse_directive_locations(p, on)?;
-    dbg!("here");
     let directive_def = DirectiveDef {
         description,
         name: DirName::from(name),
@@ -297,7 +292,6 @@ fn parse_directive_def<'a>(
         arguments,
         locations,
     };
-    dbg!(&directive_def);
     let def = Definition::DirectiveDef(directive_def);
     doc.definitions.push(def);
     Ok(())
@@ -350,7 +344,6 @@ fn parse_directive_locations<'a>(
             "expected at least one directive location after `on`",
         ));
     }
-    _ = dbg!(p.peek());
     Ok(locations)
 }
 
@@ -406,7 +399,7 @@ fn parse_interface_type<'a>(
         fields,
         interfaces,
     };
-    let def = Definition::TypeDef(TypeDef::Interface(interface_type));
+    let def = Definition::TypeDef(TypeDef::InterfaceType(interface_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -436,7 +429,7 @@ fn parse_input_object_type<'a>(
         directives,
         fields,
     };
-    let def = Definition::TypeDef(TypeDef::InputObject(input_object_type));
+    let def = Definition::TypeDef(TypeDef::InputObjectType(input_object_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -458,7 +451,7 @@ fn parse_scalar_type<'a>(
         name: TypeName::from(name),
         directives,
     };
-    let def = Definition::TypeDef(TypeDef::Scalar(scalar_type));
+    let def = Definition::TypeDef(TypeDef::ScalarType(scalar_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -665,7 +658,7 @@ fn parse_enum_type<'a>(
         directives,
         values,
     };
-    let def = Definition::TypeDef(TypeDef::Enum(enum_type));
+    let def = Definition::TypeDef(TypeDef::EnumType(enum_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -694,7 +687,7 @@ fn parse_union_type<'a>(
         directives,
         types,
     };
-    let def = Definition::TypeDef(TypeDef::Union(union_type));
+    let def = Definition::TypeDef(TypeDef::UnionType(union_type));
     doc.definitions.push(def);
     Ok(())
 }
@@ -739,9 +732,7 @@ mod tests {
     use super::*;
     use crate::*;
 
-    fn p(line: usize, col: usize) -> Pos {
-        Pos { line, col }
-    }
+    // ObjectTypeExt,
 
     #[test]
     fn parses_empty_schema_def() {
@@ -757,7 +748,7 @@ mod tests {
             description,
         }) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(1, 1));
+            assert_eq!(*pos, Pos(1, 1));
             assert_eq!(directives.len(), 0);
             assert_eq!(*query, None);
             assert_eq!(*mutation, None);
@@ -780,7 +771,7 @@ mod tests {
             res,
             Err(ParserError::VariablesNotAllowed {
                 value: TokenValue::VariableName("$myVar".to_string()),
-                pos: p(1, 20)
+                pos: Pos(1, 20)
             })
         );
     }
@@ -806,7 +797,7 @@ mod tests {
             description,
         }) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, Pos(2, 9));
             assert_eq!(directives.len(), 1);
             assert_eq!(*query, Some(TypeName("QueryHere")));
             assert_eq!(*mutation, Some(TypeName("MutationHere")));
@@ -825,7 +816,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let Definition::TypeDef(TypeDef::InputObject(InputObjectType {
+        if let Definition::TypeDef(TypeDef::InputObjectType(InputObjectType {
             pos,
             description,
             name,
@@ -833,7 +824,7 @@ mod tests {
             fields,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, Pos(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("ThingInput"));
             assert_eq!(
@@ -856,11 +847,17 @@ mod tests {
                 field_type,
                 default_value,
             } = &fields[0];
-            assert_eq!(*pos, p(2, 48));
+            assert_eq!(*pos, Pos(2, 48));
             assert_eq!(*description, None);
             assert_eq!(*field_name, FieldName("name"));
             assert_eq!(directives.len(), 0);
-            assert_eq!(*field_type, FieldType::Name(TypeName("String")));
+            assert_eq!(
+                *field_type,
+                FieldType {
+                    type_name: TypeName("String"),
+                    wrappers: vec![],
+                }
+            );
             assert_eq!(
                 default_value.as_ref().unwrap(),
                 &Value::String(StringValue::String("\"blep\""))
@@ -880,7 +877,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let Definition::TypeDef(TypeDef::Object(ObjectType {
+        if let Definition::TypeDef(TypeDef::ObjectType(ObjectType {
             pos,
             description,
             name,
@@ -889,7 +886,7 @@ mod tests {
             interfaces,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, Pos(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
@@ -903,11 +900,17 @@ mod tests {
                 field_type,
                 arguments,
             } = &fields[0];
-            assert_eq!(*pos, p(3, 13));
+            assert_eq!(*pos, Pos(3, 13));
             assert_eq!(*description, None);
             assert_eq!(*field_name, FieldName("name"));
             assert_eq!(*arguments, vec![]);
-            assert_eq!(*field_type, FieldType::Name(TypeName("String")));
+            assert_eq!(
+                *field_type,
+                FieldType {
+                    type_name: TypeName("String"),
+                    wrappers: vec![]
+                }
+            );
             assert_eq!(directives.len(), 0);
         } else {
             panic!("not object definition: {:?}", doc.definitions[0]);
@@ -922,14 +925,14 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let Definition::TypeDef(TypeDef::Scalar(ScalarType {
+        if let Definition::TypeDef(TypeDef::ScalarType(ScalarType {
             pos,
             description,
             name,
             directives,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, Pos(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(
@@ -961,7 +964,7 @@ mod tests {
             err,
             ParserError::SyntaxError {
                 value: TokenValue::NumberLit("12345".to_string()),
-                pos: p(2, 22),
+                pos: Pos(2, 22),
                 message: "invalid field definition"
             }
         );
@@ -980,7 +983,7 @@ mod tests {
             err,
             ParserError::SyntaxError {
                 value: TokenValue::NumberLit("123".to_string()),
-                pos: p(2, 27),
+                pos: Pos(2, 27),
                 message: "expected argument name"
             }
         );
@@ -1002,7 +1005,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let Definition::TypeDef(TypeDef::Enum(EnumType {
+        if let Definition::TypeDef(TypeDef::EnumType(EnumType {
             pos,
             description,
             name,
@@ -1010,7 +1013,7 @@ mod tests {
             values,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, Pos(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
@@ -1020,9 +1023,9 @@ mod tests {
                 value.description.unwrap().value,
                 StringValue::String("\"it's good\"")
             );
-            assert_eq!(value.description.unwrap().pos, p(3, 13));
+            assert_eq!(value.description.unwrap().pos, Pos(3, 13));
             assert_eq!(value.name, EnumValueName("GOOD"));
-            assert_eq!(value.pos, p(4, 13));
+            assert_eq!(value.pos, Pos(4, 13));
             assert_eq!(value.directives.len(), 0);
         } else {
             panic!("not enum definition: {:?}", doc.definitions[0]);
@@ -1037,7 +1040,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let Definition::TypeDef(TypeDef::Interface(InterfaceType {
+        if let Definition::TypeDef(TypeDef::InterfaceType(InterfaceType {
             pos,
             description,
             name,
@@ -1046,7 +1049,7 @@ mod tests {
             interfaces,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, Pos(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
@@ -1060,11 +1063,17 @@ mod tests {
                 field_type,
                 arguments,
             } = &fields[0];
-            assert_eq!(*pos, p(2, 27));
+            assert_eq!(*pos, Pos(2, 27));
             assert_eq!(*description, None);
             assert_eq!(*field_name, FieldName("name"));
             assert_eq!(directives.len(), 0);
-            assert_eq!(*field_type, FieldType::Name(TypeName("String")));
+            assert_eq!(
+                *field_type,
+                FieldType {
+                    type_name: TypeName("String"),
+                    wrappers: vec![]
+                }
+            );
             assert_eq!(*arguments, vec![]);
         } else {
             panic!("not interface definition: {:?}", doc.definitions[0]);
@@ -1079,7 +1088,7 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        if let Definition::TypeDef(TypeDef::Union(UnionType {
+        if let Definition::TypeDef(TypeDef::UnionType(UnionType {
             pos,
             description,
             name,
@@ -1087,7 +1096,7 @@ mod tests {
             types,
         })) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, Pos(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
@@ -1116,7 +1125,7 @@ mod tests {
             repeatable,
         }) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(1, 1));
+            assert_eq!(*pos, Pos(1, 1));
             assert_eq!(*description, None);
             assert_eq!(*name, DirName("@foo"));
             assert_eq!(arguments.len(), 0);
@@ -1146,8 +1155,8 @@ mod tests {
             repeatable,
         }) = &doc.definitions[0]
         {
-            assert_eq!(*pos, p(4, 9));
-            assert_eq!(description.unwrap().pos, p(1, 1));
+            assert_eq!(*pos, Pos(4, 9));
+            assert_eq!(description.unwrap().pos, Pos(1, 1));
             assert_eq!(
                 description.unwrap().value,
                 StringValue::BlockString("\"\"\"\n        Some description\n        \"\"\"")
@@ -1176,29 +1185,17 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        let type_def = if let Definition::Extension(Extension::TypeExt(TypeExt {
-            pos,
-            description,
-            type_def,
-        })) = &doc.definitions[0]
-        {
-            // pos here is actually 2, 1, but rust is including the whitespace in this test.
-            assert_eq!(*pos, p(2, 9));
-            assert_eq!(description.unwrap().as_str(), "\"some desc\"");
-            type_def
-        } else {
-            panic!("not extension: {:?}", doc.definitions[0]);
-        };
-        if let TypeDef::Object(ObjectType {
-            pos,
-            description,
-            name,
-            directives,
-            fields,
-            interfaces,
-        }) = type_def
-        {
-            assert_eq!(*pos, p(2, 16));
+        if let Definition::Ext(Ext::ObjectTypeExt(ObjectTypeExt(o))) = &doc.definitions[0] {
+            let ObjectType {
+                pos,
+                description,
+                name,
+                directives,
+                fields,
+                interfaces,
+            } = o;
+
+            assert_eq!(*pos, Pos(2, 16));
             assert_eq!(*description, None);
             assert_eq!(*name, TypeName("Thing"));
             assert_eq!(*directives, vec![]);
@@ -1212,15 +1209,26 @@ mod tests {
                 field_type,
                 arguments,
             } = &fields[0];
-            assert_eq!(*pos, p(2, 29));
+            assert_eq!(*pos, Pos(2, 29));
             assert_eq!(*description, None);
             assert_eq!(*field_name, FieldName("name"));
             assert_eq!(directives.len(), 0);
-            assert_eq!(*field_type, FieldType::Name(TypeName("String")));
+            assert_eq!(
+                *field_type,
+                FieldType {
+                    type_name: TypeName("String"),
+                    wrappers: vec![],
+                }
+            );
             assert_eq!(*arguments, vec![]);
+
+            // pos here is actually 2, 1, but rust is including the whitespace in this test.
+            // assert_eq!(*pos, Pos(2, 9));
+            // assert_eq!(description.unwrap().as_str(), "\"some desc\"");
+            // type_def
         } else {
-            panic!("not object definition: {:?}", doc.definitions[0]);
-        }
+            panic!("not object type extension: {:?}", doc.definitions[0]);
+        };
     }
 
     #[test]
@@ -1231,14 +1239,14 @@ mod tests {
         "#;
         let doc = parse_schema(text).unwrap();
         assert_eq!(doc.definitions.len(), 1);
-        let schema_def = if let Definition::Extension(Extension::SchemaExt(SchemaExt {
+        let schema_def = if let Definition::Ext(Ext::SchemaExt(SchemaExt {
             pos,
             description,
             schema_def,
         })) = &doc.definitions[0]
         {
             // pos here is actually 2, 1, but rust is including the whitespace in this test.
-            assert_eq!(*pos, p(2, 9));
+            assert_eq!(*pos, Pos(2, 9));
             assert_eq!(description.unwrap().as_str(), "\"some desc\"");
             schema_def
         } else {
@@ -1254,11 +1262,58 @@ mod tests {
             description,
         } = schema_def;
 
-        assert_eq!(*pos, p(2, 16));
+        assert_eq!(*pos, Pos(2, 16));
         assert_eq!(directives.len(), 0);
         assert_eq!(*query, Some(TypeName("MyQ")));
         assert_eq!(*mutation, None);
         assert_eq!(*subscription, None);
         assert_eq!(*description, None);
+    }
+
+    #[test]
+    fn can_parse_nested_field_type() {
+        let text = "[String!]";
+        let lexer = Lexer::new(text);
+        let parser = SchemaParser::new(lexer, ParserConfig::default());
+        let field_type = values::parse_field_type(&parser).unwrap();
+        assert_eq!(
+            field_type,
+            FieldType {
+                type_name: TypeName("String"),
+                wrappers: vec![FieldTypeWrapper::List, FieldTypeWrapper::NonNull],
+            }
+        )
+    }
+
+    #[test]
+    fn can_parse_more_nested_field_type() {
+        let text = "[String!]!";
+        let lexer = Lexer::new(text);
+        let parser = SchemaParser::new(lexer, ParserConfig::default());
+        let field_type = values::parse_field_type(&parser).unwrap();
+        assert_eq!(
+            field_type,
+            FieldType {
+                type_name: TypeName("String"),
+                wrappers: vec![FieldTypeWrapper::NonNullList, FieldTypeWrapper::NonNull],
+            }
+        )
+    }
+
+    #[test]
+
+    fn can_detect_invalid_field_type_lists() {
+        let text = "[[]String]!";
+        let lexer = Lexer::new(text);
+        let parser = SchemaParser::new(lexer, ParserConfig::default());
+        let err = values::parse_field_type(&parser).unwrap_err();
+        assert_eq!(
+            err,
+            ParserError::SyntaxError {
+                pos: Pos(1, 3),
+                message: "unexpected `]` - field type name is missing",
+                value: TokenValue::CloseBracket,
+            }
+        )
     }
 }

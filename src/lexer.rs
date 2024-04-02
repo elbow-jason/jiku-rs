@@ -7,22 +7,27 @@
 use std::cell::Cell;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub struct Pos {
-    pub line: usize,
-    pub col: usize,
-}
+pub struct Pos(pub usize, pub usize);
 
 impl Pos {
+    fn line(&self) -> usize {
+        self.0
+    }
+
+    fn col(&self) -> usize {
+        self.1
+    }
+
     fn update_char(mut self, c: char) -> Pos {
         match c {
             '\u{FEFF}' | '\r' => (),
-            '\t' => self.col += 8,
+            '\t' => self.1 += 8,
             '\n' => {
                 // go to the next line and cr back to column 1
-                self.col = 1;
-                self.line += 1;
+                self.1 = 1;
+                self.0 += 1;
             }
-            _ => self.col += 1,
+            _ => self.1 += 1,
         }
         self
     }
@@ -30,7 +35,7 @@ impl Pos {
 
 impl Default for Pos {
     fn default() -> Self {
-        Pos { line: 1, col: 1 }
+        Pos(1, 1)
     }
 }
 
@@ -340,7 +345,7 @@ impl StateCell {
         count
     }
 
-    // fn update_pos(&self, c: char) {
+    // fn update_Pos(&self, c: char) {
     //     self.state.update(|mut state| {
     //         state.pos = state.pos.update_char(c);
     //         state
@@ -642,10 +647,6 @@ mod tests {
     use super::*;
     use TokenValue::*;
 
-    fn pos(line: usize, col: usize) -> Pos {
-        Pos { line, col }
-    }
-
     fn tok<'a>(val: TokenValueStr<'a>, pos: Pos) -> Token<'a> {
         Token::new(val, pos)
     }
@@ -653,7 +654,7 @@ mod tests {
     macro_rules! test_alone {
         ($text:expr, $val:expr) => {{
             let lexer = Lexer::new($text);
-            assert_eq!(lexer.next(), Some(tok($val, pos(1, 1))));
+            assert_eq!(lexer.next(), Some(tok($val, Pos(1, 1))));
             assert_eq!(lexer.next(), None);
             ();
         }};
@@ -690,13 +691,13 @@ mod tests {
     }
 
     #[test]
-    fn lexer_cr_does_not_change_pos() {
+    fn lexer_cr_does_not_change_Pos() {
         let text = "\r\r  ";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(CarriageReturn, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(CarriageReturn, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(CarriageReturn, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(CarriageReturn, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 2))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -711,13 +712,13 @@ mod tests {
     }
 
     #[test]
-    fn lexer_unicode_bom_does_not_change_pos() {
+    fn lexer_unicode_bom_does_not_change_Pos() {
         let text = "\u{FEFF}\u{FEFF}  ";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(UnicodeBom, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(UnicodeBom, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(UnicodeBom, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(UnicodeBom, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 2))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -742,9 +743,9 @@ mod tests {
     fn lexer_empty_string_literal() {
         let text = "a\"\"b";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(Name("a"), pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(StringLit("\"\""), pos(1, 2))));
-        assert_eq!(lexer.next(), Some(tok(Name("b"), pos(1, 4))));
+        assert_eq!(lexer.next(), Some(tok(Name("a"), Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(StringLit("\"\""), Pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("b"), Pos(1, 4))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -752,9 +753,9 @@ mod tests {
     fn lexer_comment_at_eof() {
         let text = "hi # yea";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(Name("hi"), pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 3))));
-        assert_eq!(lexer.next(), Some(tok(Comment("# yea"), pos(1, 4))));
+        assert_eq!(lexer.next(), Some(tok(Name("hi"), Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Comment("# yea"), Pos(1, 4))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -762,11 +763,11 @@ mod tests {
     fn lexer_comment_followed_by_newline() {
         let text = "hi # yea\nok";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(Name("hi"), pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 3))));
-        assert_eq!(lexer.next(), Some(tok(Comment("# yea"), pos(1, 4))));
-        assert_eq!(lexer.next(), Some(tok(Newline, pos(1, 9))));
-        assert_eq!(lexer.next(), Some(tok(Name("ok"), pos(2, 1))));
+        assert_eq!(lexer.next(), Some(tok(Name("hi"), Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Comment("# yea"), Pos(1, 4))));
+        assert_eq!(lexer.next(), Some(tok(Newline, Pos(1, 9))));
+        assert_eq!(lexer.next(), Some(tok(Name("ok"), Pos(2, 1))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -774,9 +775,9 @@ mod tests {
     fn lexer_multiple_spaces() {
         let text = "   ";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 2))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 3))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -784,11 +785,11 @@ mod tests {
     fn lexer_multiple_names() {
         let text = "a b c";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(Name("a"), pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 2))));
-        assert_eq!(lexer.next(), Some(tok(Name("b"), pos(1, 3))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 4))));
-        assert_eq!(lexer.next(), Some(tok(Name("c"), pos(1, 5))));
+        assert_eq!(lexer.next(), Some(tok(Name("a"), Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("b"), Pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 4))));
+        assert_eq!(lexer.next(), Some(tok(Name("c"), Pos(1, 5))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -802,7 +803,7 @@ mod tests {
     fn lexer_neg_int_alone() {
         let text = "-123";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(NumberLit("-123"), pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(NumberLit("-123"), Pos(1, 1))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -897,9 +898,9 @@ mod tests {
     fn lexer_empty_schema() {
         let text = "schema{}";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(Name("schema"), pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(OpenCurly, pos(1, 7))));
-        assert_eq!(lexer.next(), Some(tok(CloseCurly, pos(1, 8))));
+        assert_eq!(lexer.next(), Some(tok(Name("schema"), Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(OpenCurly, Pos(1, 7))));
+        assert_eq!(lexer.next(), Some(tok(CloseCurly, Pos(1, 8))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -913,28 +914,28 @@ mod tests {
 }";
         let lexer = Lexer::new(text.trim());
         // line 1 - {
-        assert_eq!(lexer.next(), Some(tok(OpenCurly, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(Newline, pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(OpenCurly, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(Newline, Pos(1, 2))));
         // line 2 - name
-        assert_eq!(lexer.next(), Some(tok(Space, pos(2, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(2, 2))));
-        assert_eq!(lexer.next(), Some(tok(Name("name"), pos(2, 3))));
-        assert_eq!(lexer.next(), Some(tok(Newline, pos(2, 7))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(2, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(2, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("name"), Pos(2, 3))));
+        assert_eq!(lexer.next(), Some(tok(Newline, Pos(2, 7))));
 
         // line 3 - age
-        assert_eq!(lexer.next(), Some(tok(Space, pos(3, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(3, 2))));
-        assert_eq!(lexer.next(), Some(tok(Name("age"), pos(3, 3))));
-        assert_eq!(lexer.next(), Some(tok(Newline, pos(3, 6))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(3, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(3, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("age"), Pos(3, 3))));
+        assert_eq!(lexer.next(), Some(tok(Newline, Pos(3, 6))));
 
         // line 4 - picture
-        assert_eq!(lexer.next(), Some(tok(Space, pos(4, 1))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(4, 2))));
-        assert_eq!(lexer.next(), Some(tok(Name("picture"), pos(4, 3))));
-        assert_eq!(lexer.next(), Some(tok(Newline, pos(4, 10))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(4, 1))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(4, 2))));
+        assert_eq!(lexer.next(), Some(tok(Name("picture"), Pos(4, 3))));
+        assert_eq!(lexer.next(), Some(tok(Newline, Pos(4, 10))));
 
         // line 5 - }
-        assert_eq!(lexer.next(), Some(tok(CloseCurly, pos(5, 1))));
+        assert_eq!(lexer.next(), Some(tok(CloseCurly, Pos(5, 1))));
         assert_eq!(lexer.next(), None);
     }
 
@@ -942,15 +943,15 @@ mod tests {
     fn lexer_list_of_int_lits() {
         let text = "[1, 2, 3]";
         let lexer = Lexer::new(text);
-        assert_eq!(lexer.next(), Some(tok(OpenBracket, pos(1, 1))));
-        assert_eq!(lexer.next(), Some(tok(NumberLit("1"), pos(1, 2))));
-        assert_eq!(lexer.next(), Some(tok(Comma, pos(1, 3))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 4))));
-        assert_eq!(lexer.next(), Some(tok(NumberLit("2"), pos(1, 5))));
-        assert_eq!(lexer.next(), Some(tok(Comma, pos(1, 6))));
-        assert_eq!(lexer.next(), Some(tok(Space, pos(1, 7))));
-        assert_eq!(lexer.next(), Some(tok(NumberLit("3"), pos(1, 8))));
-        assert_eq!(lexer.next(), Some(tok(CloseBracket, pos(1, 9))));
+        assert_eq!(lexer.next(), Some(tok(OpenBracket, Pos(1, 1))));
+        assert_eq!(lexer.next(), Some(tok(NumberLit("1"), Pos(1, 2))));
+        assert_eq!(lexer.next(), Some(tok(Comma, Pos(1, 3))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 4))));
+        assert_eq!(lexer.next(), Some(tok(NumberLit("2"), Pos(1, 5))));
+        assert_eq!(lexer.next(), Some(tok(Comma, Pos(1, 6))));
+        assert_eq!(lexer.next(), Some(tok(Space, Pos(1, 7))));
+        assert_eq!(lexer.next(), Some(tok(NumberLit("3"), Pos(1, 8))));
+        assert_eq!(lexer.next(), Some(tok(CloseBracket, Pos(1, 9))));
         assert_eq!(lexer.next(), None);
     }
 

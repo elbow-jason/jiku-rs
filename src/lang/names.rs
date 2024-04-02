@@ -66,25 +66,31 @@ pub struct InterfaceName<'a>(pub &'a str);
 pub struct FragmentName<'a>(pub &'a str);
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FieldType<'a> {
-    Name(TypeName<'a>),
-    List(Box<FieldType<'a>>),
-    NonNull(Box<FieldType<'a>>),
+pub struct FieldType<'a> {
+    pub type_name: TypeName<'a>,
+    pub wrappers: Vec<FieldTypeWrapper>,
 }
 
-impl<'a> FieldType<'a> {
-    // https://spec.graphql.org/October2021/#sec-Types
-
-    fn is_input_type(&self, _types: &SchemaTypes<'a>) -> bool {
-        // lookup the type in the schema types
-        todo!()
-    }
-
-    fn is_output_type(&self, _types: &SchemaTypes<'a>) -> bool {
-        // lookup the type in the schema types
-        todo!()
-    }
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FieldTypeWrapper {
+    List,
+    NonNull,
+    NonNullList,
 }
+
+// impl<'a> FieldType<'a> {
+//     // https://spec.graphql.org/October2021/#sec-Types
+
+//     fn is_input_type(&self, _types: &SchemaTypes<'a>) -> bool {
+//         // lookup the type in the schema types
+//         todo!()
+//     }
+
+//     fn is_output_type(&self, _types: &SchemaTypes<'a>) -> bool {
+//         // lookup the type in the schema types
+//         todo!()
+//     }
+// }
 
 // a stub
 pub struct SchemaTypes<'a> {

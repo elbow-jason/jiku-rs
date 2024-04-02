@@ -7,8 +7,8 @@ use super::traits::Parser;
 use crate::{optional, required};
 use crate::{
     Argument, Description, Directive, DirectiveName as DirName, EnumValue, EnumValueName,
-    FieldName, FieldType, Float64, Map, StringValue, Token, TokenValue, TypeName, Value,
-    VariableName as VarName,
+    FieldName, FieldType, FieldTypeWrapper, Float64, Map, StringValue, Token, TokenValue, TypeName,
+    Value, VariableName as VarName,
 };
 use TokenValue::*;
 
@@ -226,29 +226,107 @@ pub fn parse_default_value<'a, P: Parser<'a>>(p: &P) -> Result<Option<Value<'a>>
     Ok(Some(value))
 }
 
-pub fn parse_field_type<'a, P: Parser<'a>>(p: &P) -> Result<FieldType<'a>, ParserError> {
-    // let mut name: Option<Token<'a>> = None;
+// pub fn parse_field_type<'a, P: Parser<'a>>(p: &P) -> Result<FieldType<'a>, ParserError> {
+//     let (type_name, wrappers) = do_parse_field_type(p, vec![])?;
+//     Ok(FieldType {
+//         type_name,
+//         wrappers: wrappers.into_iter().rev().collect(),
+//     })
+// }
 
-    let tok = p.peek()?;
-    let ty = match tok.val {
-        OpenBracket => {
-            _ = p.next()?;
-            let item_type = parse_field_type(p)?;
-            _ = required!(p, CloseBracket, "list type had no closing bracket")?;
-            FieldType::List(Box::new(item_type))
+pub fn parse_field_type<'a, P: Parser<'a>>(p: &P) -> Result<FieldType<'a>, ParserError> {
+    let mut depth = 0;
+    let mut wrappers = vec![];
+    let mut type_name = None;
+    let mut first_token = None;
+    let mut closing = false;
+    loop {
+        let tok = p.peek()?;
+        if first_token.is_none() {
+            first_token = Some(tok);
         }
-        Name(_) => {
-            // this name = required! can never fail (we just peeked the name),
-            // but we leave the message in place so we'll get a nice error
-            // message if ever...
-            let name = required!(p, Name(_), "type requires a name").unwrap();
-            FieldType::Name(TypeName::from(name))
+        match &tok.val {
+            OpenBracket => {
+                if closing {
+                    return Err(ParserError::from(ParserError::syntax(
+                        tok,
+                        "unexpected `[` - field type list was closing",
+                    )));
+                }
+                _ = p.next()?;
+                depth += 1;
+                continue;
+            }
+            Name(_) => {
+                if closing {
+                    return Err(ParserError::syntax(
+                        tok,
+                        "unexpected name - field type list was closing",
+                    ));
+                }
+                if type_name.is_some() {
+                    if depth == 0 {
+                        // we are done parsing this field type and we've encountered
+                        // a subsequent field name.
+                        break;
+                    }
+                    // we encountered a field type with 2 (or more) names.
+                    return Err(ParserError::already_exists(
+                        tok,
+                        "type field already has a named type",
+                        type_name,
+                    ));
+                }
+                _ = p.next()?;
+                type_name = Some(tok);
+                let bang = optional!(p, Bang)?;
+                if bang.is_some() {
+                    wrappers.push(FieldTypeWrapper::NonNull)
+                }
+            }
+            CloseBracket => {
+                if type_name.is_none() {
+                    return Err(ParserError::from(ParserError::syntax(
+                        tok,
+                        "unexpected `]` - field type name is missing",
+                    )));
+                }
+                _ = p.next()?;
+                closing = true;
+                let bang = optional!(p, Bang)?;
+                if bang.is_some() {
+                    wrappers.push(FieldTypeWrapper::NonNullList);
+                } else {
+                    wrappers.push(FieldTypeWrapper::List);
+                }
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {
+                if depth != 0 {
+                    return Err(ParserError::syntax(tok, "invalid field type"));
+                }
+                break;
+            }
         }
-        _ => return Err(ParserError::syntax(tok, "type name")),
-    };
-    let bang = optional!(p, Bang)?;
-    if bang.is_some() {
-        return Ok(FieldType::NonNull(Box::new(ty)));
     }
-    Ok(ty)
+    match type_name {
+        None => match first_token {
+            Some(tok) => Err(ParserError::syntax(tok, "field type is missing type name")),
+            None => Err(ParserError::unexpected_eof(
+                p.peek_prev(),
+                "expected field type",
+            )),
+        },
+        Some(type_name) => {
+            wrappers.reverse();
+            let field_type = FieldType {
+                type_name: TypeName::from(type_name),
+                wrappers,
+            };
+            Ok(field_type)
+        }
+    }
 }

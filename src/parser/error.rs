@@ -14,10 +14,12 @@ pub enum ParserError {
         message: &'static str,
     },
 
-    #[error("token already exists: {value:?} {pos:?}: {message:?}")]
+    #[error("token already exists: {value:?} {pos:?}: {message:?} {exists:?} {exists_pos:?}")]
     AlreadyExists {
         value: TokenValue<String>,
         pos: Pos,
+        exists: Option<TokenValue<String>>,
+        exists_pos: Option<Pos>,
         message: &'static str,
     },
 
@@ -57,10 +59,16 @@ impl ParserError {
         }
     }
 
-    pub fn already_exists<'a>(token: Token<'a>, message: &'static str) -> ParserError {
+    pub fn already_exists<'a>(
+        token: Token<'a>,
+        message: &'static str,
+        exists: Option<Token<'a>>,
+    ) -> ParserError {
         ParserError::AlreadyExists {
             value: token.val.to_owned(),
             pos: token.pos,
+            exists: exists.map(|t| t.val.to_owned()),
+            exists_pos: exists.map(|t| t.pos),
             message,
         }
     }
